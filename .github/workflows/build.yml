@@ -5,147 +5,97 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to build (e.g., 1.0.0)'
-        required: false
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: macos-13
-            platform: mac
-            arch: x64
-          - os: macos-latest
-            platform: mac
-            arch: arm64
-          - os: windows-latest
-            platform: win
-            arch: x64
-
-    runs-on: ${{ matrix.os }}
-
+  build-mac-arm64:
+    runs-on: macos-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: 9
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm electron-builder --mac --arm64 --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-${{ matrix.arch }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.arch }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build application
-        run: pnpm build
-
-      - name: Build Electron app (macOS x64)
-        if: matrix.platform == 'mac' && matrix.arch == 'x64'
-        run: pnpm electron-builder --mac --x64 --publish never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Electron app (macOS arm64)
-        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
-        run: pnpm electron-builder --mac --arm64 --publish never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Electron app (Windows)
-        if: matrix.platform == 'win'
-        run: pnpm electron-builder --win --x64 --publish never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts (macOS x64)
-        if: matrix.platform == 'mac' && matrix.arch == 'x64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-x64-build
+          name: mac-arm64
           path: |
             dist/*.dmg
             dist/*.zip
-          retention-days: 30
 
-      - name: Upload artifacts (macOS arm64)
-        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
-        uses: actions/upload-artifact@v4
+  build-mac-x64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: macos-arm64-build
+          node-version: '20'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm electron-builder --mac --x64 --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-x64
           path: |
             dist/*.dmg
             dist/*.zip
-          retention-days: 30
 
-      - name: Upload artifacts (Windows)
-        if: matrix.platform == 'win'
-        uses: actions/upload-artifact@v4
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: windows-build
-          path: |
-            dist/*.exe
-          retention-days: 30
+          node-version: '20'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm electron-builder --win --x64 --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-x64
+          path: dist/*.exe
 
   release:
-    needs: build
+    needs: [build-mac-arm64, build-mac-x64, build-win]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download macOS x64 artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: macos-x64-build
+          name: mac-arm64
           path: dist/
-
-      - name: Download macOS arm64 artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: macos-arm64-build
+          name: mac-x64
           path: dist/
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: windows-build
+          name: win-x64
           path: dist/
-
-      - name: Get version from tag
-        id: get_version
+      - id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: List files
-        run: ls -la dist/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - run: ls -la dist/
+      - uses: softprops/action-gh-release@v1
         with:
           name: Release v${{ steps.get_version.outputs.VERSION }}
           body: |
