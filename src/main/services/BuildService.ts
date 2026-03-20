@@ -37,12 +37,14 @@ export class BuildService {
    * @param branch - The branch to clone
    * @param gitlabUrl - The GitLab server URL (e.g., https://gitlab.com)
    * @param token - Optional GitLab token for authentication
+   * @param commitSha - Optional commit SHA to checkout (for rollback)
    */
   async clone(
     project: GitLabProject,
     branch: string,
     gitlabUrl?: string,
-    token?: string
+    token?: string,
+    commitSha?: string
   ): Promise<string> {
     const projectPath = this.getProjectPath(project.id)
 
@@ -53,8 +55,16 @@ export class BuildService {
       logger.info('build', `Pulling latest changes for project ${project.id}`)
 
       await execa('git', ['fetch', 'origin'], { cwd: projectPath })
-      await execa('git', ['checkout', branch], { cwd: projectPath })
-      await execa('git', ['pull', 'origin', branch], { cwd: projectPath })
+
+      if (commitSha) {
+        // 回滚模式：checkout 到指定 commit
+        logger.info('build', `Checking out commit ${commitSha} for rollback`)
+        await execa('git', ['checkout', commitSha], { cwd: projectPath })
+      } else {
+        // 正常模式：checkout branch 并 pull
+        await execa('git', ['checkout', branch], { cwd: projectPath })
+        await execa('git', ['pull', 'origin', branch], { cwd: projectPath })
+      }
     } catch {
       // Clone fresh
       logger.info('build', `Cloning project ${project.id}`)
@@ -91,6 +101,12 @@ export class BuildService {
       logger.info('build', `Cloning from ${cloneUrl.replace(/oauth2:[^@]+@/, 'oauth2:***@')}`)
 
       await execa('git', ['clone', '-b', branch, cloneUrl, projectPath])
+
+      if (commitSha) {
+        // 克隆后 checkout 到指定 commit
+        logger.info('build', `Checking out commit ${commitSha} after clone`)
+        await execa('git', ['checkout', commitSha], { cwd: projectPath })
+      }
     }
 
     return projectPath

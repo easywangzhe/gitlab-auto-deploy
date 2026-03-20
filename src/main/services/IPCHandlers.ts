@@ -719,6 +719,54 @@ export async function registerIPCHandlers(): Promise<void> {
     return { success: true, data: stats }
   })
 
+  // ==================== Git-based Rollback ====================
+
+  ipcMain.handle('gitlab:get-commits', async (_event, projectId: string, branch: string, limit?: number) => {
+    try {
+      const connection = settings?.gitlabConnection
+      if (!connection) {
+        return { success: false, error: 'GitLab connection not configured' }
+      }
+
+      await gitLabService.connect(connection)
+      const commits = await gitLabService.getBranchCommits(projectId, branch, limit)
+      return { success: true, data: commits }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch commits'
+      }
+    }
+  })
+
+  ipcMain.handle('deployments:last-successful', async (_event, projectId: string) => {
+    try {
+      const sha = deploymentQueue.getLastSuccessfulCommitSha(projectId)
+      return { success: true, data: sha }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get last successful commit'
+      }
+    }
+  })
+
+  ipcMain.handle('deployments:rollback-to-commit', async (_event, projectId: string, commitSha: string, branch: string) => {
+    try {
+      const project = projects.get(projectId)
+      if (!project) {
+        return { success: false, error: 'Project not found' }
+      }
+      const deploymentId = await deploymentQueue.startRollbackDeployment(project, commitSha, branch)
+      return { success: true, data: deploymentId }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to start rollback deployment'
+      }
+    }
+  })
+
   logger.info('ipc', 'IPC handlers registered')
 }
 

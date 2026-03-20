@@ -223,9 +223,22 @@ export const DeploymentSchema = z.object({
     level: z.enum(['debug', 'info', 'warn', 'error']),
     message: z.string()
   })).default([]),
-  error: z.string().optional()
+  error: z.string().optional(),
+  commitSha: z.string().optional(),        // 部署的 commit SHA
+  isRollback: z.boolean().default(false),  // 是否为回滚部署
+  rollbackFromSha: z.string().optional()   // 回滚前的 SHA
 })
 export interface Deployment extends z.infer<typeof DeploymentSchema> {}
+
+/** Commit 信息（用于回滚选择） */
+export const CommitInfoSchema = z.object({
+  sha: z.string(),
+  shortSha: z.string(),      // 前 7 位
+  message: z.string(),
+  author: z.string(),
+  authoredAt: z.date()
+})
+export type CommitInfo = z.infer<typeof CommitInfoSchema>
 
 /** 回滚 */
 export const RollbackSchema = z.object({

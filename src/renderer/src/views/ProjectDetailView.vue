@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useProjectsStore } from '../stores/projects'
 import { useDeploymentsStore } from '../stores/deployments'
 import { useSettingsStore } from '../stores/settings'
-import type { GitLabProject, Deployment, DeploymentStatus } from '../../../shared/types'
+import type { GitLabProject, Deployment, DeploymentStatus, CommitInfo } from '../../../shared/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +25,13 @@ const projectDeployments = computed(() => {
     return timeB - timeA
   })
 })
+
+// 回滚相关状态
+const rollbackDialogVisible = ref(false)
+const commits = ref<CommitInfo[]>([])
+const loadingCommits = ref(false)
+const selectedCommit = ref<CommitInfo | null>(null)
+const rollingBack = ref(false)
 
 const statusColors: Record<string, string> = {
   pending: 'warning',
@@ -103,6 +110,72 @@ const formatDuration = (start: Date, end?: Date) => {
 const goBack = () => {
   router.push('/projects')
 }
+
+// 打开回滚对话框
+const openRollbackDialog = async () => {
+  if (!project.value) return
+
+  // 检查 GitLab ID 是否配置
+  if (!project.value.gitlabId) {
+    ElMessage.warning('项目未关联 GitLab 项目 ID，请重新编辑项目并选择 GitLab 项目')
+    return
+  }
+
+  // 检查 GitLab 连接是否配置
+  if (!settingsStore.gitlabConnection) {
+    ElMessage.warning('请先配置 GitLab 连接（设置 → GitLab 连接）')
+    return
+  }
+
+  rollbackDialogVisible.value = true
+  loadingCommits.value = true
+  selectedCommit.value = null
+
+  try {
+    commits.value = await deploymentsStore.getBranchCommits(
+      project.value.gitlabId.toString(),
+      project.value.branch,
+      20
+    )
+    if (commits.value.length === 0) {
+      ElMessage.warning('未找到提交记录')
+    }
+  } catch (error) {
+    ElMessage.error('获取提交记录失败: ' + (error instanceof Error ? error.message : '未知错误'))
+  } finally {
+    loadingCommits.value = false
+  }
+}
+
+// 选择 commit
+const handleCommitSelect = (commit: CommitInfo) => {
+  selectedCommit.value = commit
+}
+
+// 执行回滚
+const executeRollback = async () => {
+  if (!selectedCommit.value || !project.value) return
+
+  rollingBack.value = true
+  try {
+    await deploymentsStore.rollbackToCommit(
+      projectId.value,
+      selectedCommit.value.sha,
+      project.value.branch
+    )
+    ElMessage.success('回滚部署已开始')
+    rollbackDialogVisible.value = false
+  } catch (error) {
+    ElMessage.error('回滚失败: ' + (error instanceof Error ? error.message : '未知错误'))
+  } finally {
+    rollingBack.value = false
+  }
+}
+
+// 格式化时间
+const formatTime = (date: Date) => {
+  return new Date(date).toLocaleString('zh-CN')
+}
 </script>
 
 <template>
@@ -124,7 +197,10 @@ const goBack = () => {
         <template #header>
           <div class="card-header">
             <span>项目信息</span>
-            <el-button type="primary" @click="startDeploy" :loading="deploying" :disabled="deploying">开始部署</el-button>
+            <div class="card-header-actions">
+              <el-button type="warning" @click="openRollbackDialog">回滚</el-button>
+              <el-button type="primary" @click="startDeploy" :loading="deploying" :disabled="deploying">开始部署</el-button>
+            </div>
           </div>
         </template>
 
@@ -152,57 +228,92 @@ const goBack = () => {
           <span>部署历史</span>
         </template>
 
-        <el-table :data="projectDeployments" stripe>
-          <el-table-column prop="id" label="ID" width="280" />
+        <el-table :data="projectDeployments" stripe v-if="projectDeployments.length > 0">
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
-              <el-tag :type="statusColors[row.status]">
-                {{ statusLabels[row.status] }}
-              </el-tag>
+              <div class="status-cell">
+                <el-tag :type="statusColors[row.status]" size="small">
+                  {{ statusLabels[row.status] }}
+                </el-tag>
+                <el-tag v-if="row.isRollback" type="warning" size="small" style="margin-left: 4px">回滚</el-tag>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column label="进度" width="120">
+          <el-table-column label="Commit" width="90">
             <template #default="{ row }">
-              <el-progress 
-                :percentage="row.progress || 0" 
+              <el-tooltip v-if="row.commitSha" :content="row.commitSha" placement="top">
+                <span class="commit-sha">{{ row.commitSha.substring(0, 7) }}</span>
+              </el-tooltip>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="进度" width="140">
+            <template #default="{ row }">
+              <el-progress
+                :percentage="row.progress || 0"
                 :status="row.status === 'success' ? 'success' : row.status === 'failed' ? 'exception' : undefined"
+                :stroke-width="6"
               />
             </template>
           </el-table-column>
-          <el-table-column label="开始时间" width="180">
+          <el-table-column label="开始时间" width="170">
             <template #default="{ row }">
               {{ formatDate(row.startedAt) }}
             </template>
           </el-table-column>
-          <el-table-column label="耗时">
+          <el-table-column label="耗时" width="100">
             <template #default="{ row }">
               {{ formatDuration(row.startedAt, row.completedAt) }}
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="120">
+          <el-table-column label="错误信息" min-width="200">
             <template #default="{ row }">
-              <el-button
-                v-if="row.status === 'pending' || row.status === 'cloning' || row.status === 'installing' || row.status === 'building' || row.status === 'uploading' || row.status === 'health_check'"
-                size="small"
-                type="danger"
-                @click="deploymentsStore.cancelDeployment(row.id)"
-              >
-                取消
-              </el-button>
-              <el-button 
-                v-if="row.status === 'failed'"
-                size="small"
-                @click="deploymentsStore.rollbackDeployment(row.id)"
-              >
-                回滚
-              </el-button>
+              <el-tooltip v-if="row.error" :content="row.error" placement="top">
+                <span class="error-text">{{ row.error }}</span>
+              </el-tooltip>
+              <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
         </el-table>
+        <el-empty v-else description="暂无部署记录" :image-size="80" />
       </el-card>
     </template>
 
     <el-empty v-else description="项目不存在" />
+
+    <!-- 回滚对话框 -->
+    <el-dialog v-model="rollbackDialogVisible" title="选择回滚版本" width="700px">
+      <el-alert type="warning" :closable="false" style="margin-bottom: 16px">
+        <template #title>
+          <strong>注意</strong>：回滚将重新部署所选版本的代码，请确认数据兼容性。
+        </template>
+      </el-alert>
+
+      <el-form label-width="80px">
+        <el-form-item label="当前分支">
+          <el-tag>{{ project?.branch }}</el-tag>
+        </el-form-item>
+        <el-form-item label="选择版本">
+          <el-table :data="commits" v-loading="loadingCommits" max-height="400" highlight-current-row @current-change="handleCommitSelect">
+            <el-table-column prop="shortSha" label="Commit" width="100" />
+            <el-table-column prop="message" label="提交信息" />
+            <el-table-column prop="author" label="作者" width="100" />
+            <el-table-column prop="authoredAt" label="时间" width="160">
+              <template #default="{ row }">
+                {{ formatTime(row.authoredAt) }}
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="rollbackDialogVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!selectedCommit" @click="executeRollback" :loading="rollingBack">
+          确认回滚
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -222,6 +333,39 @@ const goBack = () => {
     display: flex;
     justify-content: space-between;
     align-items: center;
+  }
+
+  .card-header-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .status-cell {
+    display: flex;
+    align-items: center;
+  }
+
+  .commit-sha {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 12px;
+    color: #409eff;
+    background: #ecf5ff;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .text-muted {
+    color: #909399;
+  }
+
+  .error-text {
+    color: #f56c6c;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+    max-width: 200px;
   }
 }
 </style>

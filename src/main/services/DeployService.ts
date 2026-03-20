@@ -46,7 +46,7 @@ export class DeployService {
   /**
    * Save deployment to disk
    */
-  private async saveDeployment(deployment: Deployment): Promise<void> {
+  async saveDeployment(deployment: Deployment): Promise<void> {
     try {
       await this.ensureDeploymentsDir()
       const filePath = path.join(this.getDeploymentsPath(), `${deployment.id}.json`)

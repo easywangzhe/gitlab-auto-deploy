@@ -8,7 +8,8 @@ import {
   MergeRequest,
   GitLabProject,
   Server,
-  SSHCredentials
+  SSHCredentials,
+  CommitInfo
 } from '../../shared/types'
 import { deployService } from './DeployService'
 import { buildService } from './BuildService'
@@ -378,14 +379,21 @@ export class DeploymentQueue {
       const gitlabUrl = gitlabConnection?.apiUrl
       const gitlabToken = gitlabConnection?.token
 
+      // 支持指定 commit SHA 部署（回滚时使用）
+      const commitSha = mergeRequest.sha
+
       const projectPath = await buildService.clone(
         project,
         mergeRequest.sourceBranch,
         gitlabUrl,
-        gitlabToken
+        gitlabToken,
+        commitSha
       )
       deployService.updateProgress(deploymentId, 10)
       deployService.addDeploymentLog(deploymentId, 'info', `Cloned to ${projectPath}`)
+      if (commitSha) {
+        deployService.addDeploymentLog(deploymentId, 'info', `Checked out commit: ${commitSha.substring(0, 7)}`)
+      }
       logService.info('build', `Repository cloned to ${projectPath}`, { projectId: project.id })
 
       this.onDeploymentUpdate?.(deployService.getDeployment(deploymentId)!)
@@ -575,8 +583,19 @@ export class DeploymentQueue {
 
       // Step 9: Complete
       deployService.updateProgress(deploymentId, 100)
+
+      // 记录 commit SHA
+      const finalDeployment = deployService.getDeployment(deploymentId)
+      if (finalDeployment) {
+        finalDeployment.commitSha = mergeRequest.sha || await this.getCurrentCommitSha(projectPath)
+        await deployService.saveDeployment(finalDeployment)
+      }
+
       deployService.completeDeployment(deploymentId, true)
       deployService.addDeploymentLog(deploymentId, 'info', 'Deployment completed successfully')
+      if (mergeRequest.sha) {
+        deployService.addDeploymentLog(deploymentId, 'info', `Deployed commit: ${mergeRequest.sha.substring(0, 7)}`)
+      }
       logService.info('deploy', `Deployment completed successfully for ${project.name}`, {
         projectId: project.id,
         duration: `${((Date.now() - startTime) / 1000).toFixed(2)}s`
@@ -782,6 +801,66 @@ export class DeploymentQueue {
         })
       }
     }
+  }
+
+  // ==================== Git-based Rollback ====================
+
+  /**
+   * 创建回滚部署
+   */
+  async startRollbackDeployment(
+    project: GitLabProject,
+    targetCommitSha: string,
+    targetBranch: string
+  ): Promise<string> {
+    // 创建一个特殊的 MergeRequest 对象用于回滚
+    const rollbackMR: MergeRequest = {
+      id: crypto.randomUUID(),
+      gitlabId: 0,
+      sourceBranch: targetBranch,
+      targetBranch: targetBranch,
+      state: 'merged' as const,
+      title: `Rollback to ${targetCommitSha.substring(0, 7)}`,
+      projectId: project.id,
+      sha: targetCommitSha
+    }
+
+    const deploymentId = await this.enqueue(project, rollbackMR, 10) // 高优先级
+
+    // 标记为回滚部署
+    const deployment = deployService.getDeployment(deploymentId)
+    if (deployment) {
+      deployment.isRollback = true
+      deployment.commitSha = targetCommitSha
+      await deployService.saveDeployment(deployment)
+    }
+
+    return deploymentId
+  }
+
+  /**
+   * 获取项目上一个成功部署的 commit SHA
+   */
+  getLastSuccessfulCommitSha(projectId: string): string | null {
+    const deployments = deployService.getDeploymentsByProject(projectId)
+    const successful = deployments
+      .filter(d => d.status === 'success' && d.commitSha)
+      .sort((a, b) => {
+        const timeA = a.completedAt ? new Date(a.completedAt).getTime() : 0
+        const timeB = b.completedAt ? new Date(b.completedAt).getTime() : 0
+        return timeB - timeA
+      })
+
+    return successful[0]?.commitSha || null
+  }
+
+  /**
+   * 获取当前目录的 commit SHA
+   */
+  private async getCurrentCommitSha(projectPath: string): Promise<string> {
+    const execa = await import('execa')
+    const result = await execa.execa('git', ['rev-parse', 'HEAD'], { cwd: projectPath })
+    return result.stdout.trim()
   }
 }
 

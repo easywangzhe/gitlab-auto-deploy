@@ -4,7 +4,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Deployment } from '../../../shared/types'
+import type { Deployment, CommitInfo } from '../../../shared/types'
 
 interface DeploymentProgress {
   deploymentId: string
@@ -124,6 +124,33 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     return deployments.value.filter(d => d.projectId === projectId)
   }
 
+  // 获取分支 commit 列表（用于回滚选择）
+  async function getBranchCommits(projectId: string, branch: string, limit?: number): Promise<CommitInfo[]> {
+    const result = await window.electronAPI.getBranchCommits(projectId, branch, limit)
+    if (result.success && result.data) {
+      return result.data
+    }
+    error.value = result.error || 'Failed to fetch commits'
+    throw new Error(result.error || '获取提交记录失败')
+  }
+
+  // 获取上一个成功部署的 commit SHA
+  async function getLastSuccessfulCommit(projectId: string): Promise<string | null> {
+    const result = await window.electronAPI.getLastSuccessfulCommit(projectId)
+    return result.success ? result.data || null : null
+  }
+
+  // 启动回滚部署
+  async function rollbackToCommit(projectId: string, commitSha: string, branch: string): Promise<string | null> {
+    const result = await window.electronAPI.rollbackToCommit(projectId, commitSha, branch)
+    if (result.success && result.data) {
+      await loadDeployments()
+      return result.data
+    }
+    error.value = result.error || 'Failed to start rollback'
+    return null
+  }
+
   const activeDeploymentCount = computed(() => activeDeployments.value.size)
 
   const isInProgress = computed(() => (deploymentId: string) =>
@@ -144,6 +171,9 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     handleDeploymentStarted,
     handleDeploymentProgress,
     getDeploymentsByProject,
+    getBranchCommits,
+    getLastSuccessfulCommit,
+    rollbackToCommit,
     activeDeploymentCount,
     isInProgress
   }

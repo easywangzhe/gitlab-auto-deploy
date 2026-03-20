@@ -275,6 +275,33 @@ export class GitLabService {
   setLastCheckTime(projectId: string, time: Date): void {
     this.lastCheckTimes.set(projectId, time)
   }
+
+  /**
+   * 获取分支的 commit 列表（用于回滚选择）
+   */
+  async getBranchCommits(
+    projectId: string,
+    branch: string,
+    limit: number = 20
+  ): Promise<Array<{ sha: string; shortSha: string; message: string; author: string; authoredAt: Date }>> {
+    if (!this.api) {
+      throw new Error('GitLab not connected')
+    }
+
+    const numericProjectId = parseInt(projectId, 10)
+    const commits = await this.api.Commits.all(numericProjectId, {
+      refName: branch,
+      perPage: limit
+    })
+
+    return commits.map((commit) => ({
+      sha: commit.id,
+      shortSha: commit.short_id || commit.id.substring(0, 7),
+      message: commit.message || '',
+      author: commit.author_name || '',
+      authoredAt: new Date(commit.authored_date || commit.created_at)
+    }))
+  }
 }
 
 // Add crypto import for uuid

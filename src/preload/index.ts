@@ -10,7 +10,8 @@ import type {
   AppSettings,
   GitLabConnection,
   Server,
-  MergeRequest
+  MergeRequest,
+  CommitInfo
 } from '../shared/types'
 
 // Log types - must match LogService
@@ -118,6 +119,11 @@ interface ElectronAPI {
   clearLogs: (category: LogCategory) => Promise<IPCResult<void>>
   clearAllLogs: () => Promise<IPCResult<void>>
   getLogStats: () => Promise<IPCResult<Record<LogCategory, { count: number; maxSize: number }>>>
+
+  // Git-based Rollback
+  getBranchCommits: (projectId: string, branch: string, limit?: number) => Promise<IPCResult<CommitInfo[]>>
+  getLastSuccessfulCommit: (projectId: string) => Promise<IPCResult<string | null>>
+  rollbackToCommit: (projectId: string, commitSha: string, branch: string) => Promise<IPCResult<string>>
 }
 
 // Build the API object
@@ -176,6 +182,11 @@ const api: ElectronAPI = {
   clearLogs: (category) => ipcRenderer.invoke('logs:clear', category),
   clearAllLogs: () => ipcRenderer.invoke('logs:clear-all'),
   getLogStats: () => ipcRenderer.invoke('logs:stats'),
+
+  // Git-based Rollback
+  getBranchCommits: (projectId, branch, limit) => ipcRenderer.invoke('gitlab:get-commits', projectId, branch, limit),
+  getLastSuccessfulCommit: (projectId) => ipcRenderer.invoke('deployments:last-successful', projectId),
+  rollbackToCommit: (projectId, commitSha, branch) => ipcRenderer.invoke('deployments:rollback-to-commit', projectId, commitSha, branch),
 
   // Event listeners - return cleanup function
   onProjectUpdated: (callback) => {
