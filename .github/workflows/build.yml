@@ -36,28 +36,6 @@ jobs:
             dist/*.dmg
             dist/*.zip
 
-  build-mac-x64:
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm electron-builder --mac --x64 --publish never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mac-x64
-          path: |
-            dist/*.dmg
-            dist/*.zip
-
   build-win:
     runs-on: windows-latest
     steps:
@@ -88,12 +66,6 @@ jobs:
         with:
           name: mac-arm64
           path: dist/
-          continue-on-error: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: mac-x64
-          path: dist/
-          continue-on-error: true
       - uses: actions/download-artifact@v4
         with:
           name: win-x64
