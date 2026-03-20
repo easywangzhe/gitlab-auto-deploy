@@ -14,7 +14,7 @@ interface LogEntry {
   data?: Record<string, unknown>
 }
 
-const activeCategory = ref<LogCategory>('daemon')
+const activeCategory = ref<LogCategory>('gitlab-poll')
 const logs = ref<LogEntry[]>([])
 const stats = ref<Record<LogCategory, { count: number; maxSize: number }>>()
 const autoRefresh = ref(true)

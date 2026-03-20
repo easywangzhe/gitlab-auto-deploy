@@ -18,6 +18,7 @@ export class GitLabService {
   private config: GitLabConnection | null = null
   private pollingInterval: NodeJS.Timeout | null = null
   private lastCheckTimes: Map<string, Date> = new Map()
+  private lastKnownShas: Map<string, string> = new Map()
 
   async connect(config: GitLabConnection): Promise<void> {
     this.config = config
@@ -155,6 +156,7 @@ export class GitLabService {
 
   /**
    * Check for new commits on a branch (supports direct push/merge)
+   * Uses commit SHA tracking to detect changes reliably
    */
   async checkBranchCommits(
     projectId: string,
@@ -180,21 +182,37 @@ export class GitLabService {
       // Get the latest commit
       const latestCommit = commits[0]
       const authoredDate = new Date(latestCommit.authored_date || latestCommit.created_at)
+      const latestSha = latestCommit.id
+
+      // Check if this is a new commit by comparing SHA with the last known one
+      const lastKnownSha = this.lastKnownShas.get(`${projectId}-${branch}`)
+      const isNewSha = lastKnownSha && lastKnownSha !== latestSha
+
+      // Also check by time as a fallback (for first run or if SHA tracking fails)
+      const isNewByTime = authoredDate > lastCheckTime
+
+      // Update the last known SHA
+      this.lastKnownShas.set(`${projectId}-${branch}`, latestSha)
+
+      const hasNewCommits = isNewSha || isNewByTime
 
       logger.debug('gitlab', 'Checking branch commits', {
         projectId,
         branch,
-        latestCommitSha: latestCommit.id,
-        latestCommitMessage: latestCommit.message,
+        latestCommitSha: latestSha,
+        lastKnownSha: lastKnownSha || 'none',
+        latestCommitMessage: latestCommit.message?.trim(),
         authoredAt: authoredDate.toISOString(),
         lastCheckTime: lastCheckTime.toISOString(),
-        isNew: authoredDate > lastCheckTime
+        isNewSha,
+        isNewByTime,
+        hasNewCommits
       })
 
       return {
-        hasNewCommits: authoredDate > lastCheckTime,
+        hasNewCommits,
         latestCommit: {
-          sha: latestCommit.id,
+          sha: latestSha,
           message: latestCommit.message,
           authoredAt: authoredDate
         }
