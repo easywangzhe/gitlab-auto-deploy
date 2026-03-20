@@ -1,0 +1,128 @@
+appId: com.gitlab.autodeploy
+productName: GitLab Auto Deploy
+copyright: Copyright © 2024 wangzhe
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - '!**/.git'
+  - '!**/.github'
+  - '!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,LICENSE,license}'
+  - '!**/node_modules/.bin'
+  - '!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}'
+  - '!.editorconfig'
+  - '!**/._*'
+  - '!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}'
+  - '!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}'
+  - '!**/{appveyor.yml,.travis.yml,circle.yml}'
+  - '!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}'
+  - '!**/*.ts'
+  - '!**/*.vue'
+  - '!src/**/*'
+  - 'out/**/*'
+
+extraResources:
+  - from: resources
+    to: resources
+    filter:
+      - '**/*'
+
+# macOS Configuration
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  type: distribution
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# Windows Configuration
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - ia32
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ${productName}
+  include: build/installer.nsh
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
+
+# Linux Configuration
+linux:
+  icon: build/icons
+  category: Development
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+    - target: rpm
+      arch:
+        - x64
+  maintainer: wangzhe
+  desktop:
+    Name: GitLab Auto Deploy
+    Comment: Automated deployment tool for GitLab projects
+    Categories: Development;IDE;
+
+appImage:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# Auto Update Configuration
+publish:
+  - provider: github
+    owner: easywangzhe
+    repo: gitlab-auto-deploy
+    releaseType: release
+  # Alternative: custom server
+  # - provider: generic
+  #   url: https://releases.example.com/updates
+
+# Build Options
+buildDependenciesFromSource: false
+nodeGypRebuild: false
+npmRebuild: true
+
+# ASAR Configuration
+asar: true
+asarUnpack:
+  - '**/*.node'
