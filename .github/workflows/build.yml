@@ -65,19 +65,19 @@ jobs:
 
       - name: Build Electron app (macOS x64)
         if: matrix.platform == 'mac' && matrix.arch == 'x64'
-        run: pnpm electron-builder --mac --x64
+        run: pnpm electron-builder --mac --x64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Electron app (macOS arm64)
         if: matrix.platform == 'mac' && matrix.arch == 'arm64'
-        run: pnpm electron-builder --mac --arm64
+        run: pnpm electron-builder --mac --arm64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Electron app (Windows)
         if: matrix.platform == 'win'
-        run: pnpm electron-builder --win --x64
+        run: pnpm electron-builder --win --x64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
