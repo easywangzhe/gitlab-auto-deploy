@@ -86,7 +86,15 @@ jobs:
             | macOS (Apple Silicon) | `GitLab Auto Deploy-${{ steps.get_version.outputs.VERSION }}-arm64.dmg` |
             | Windows (64-bit) | `GitLab Auto Deploy Setup ${{ steps.get_version.outputs.VERSION }}.exe` |
 
-            > **注意**: Intel Mac 用户可以使用 Apple Silicon 版本配合 Rosetta 2 运行，或自行从源码构建。
+            ### macOS 用户注意
+
+            由于应用未经过 Apple 公证，首次打开会提示"已损坏"。请在终端运行以下命令解决：
+
+            ```bash
+            sudo xattr -cr /Applications/gitlab-auto-deploy.app
+            ```
+
+            然后即可正常打开应用。
 
             ### 更新说明
 
