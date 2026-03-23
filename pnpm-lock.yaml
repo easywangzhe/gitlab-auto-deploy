@@ -11,6 +11,12 @@ importers:
       '@element-plus/icons-vue':
         specifier: ^2.3.2
         version: 2.3.2(vue@3.5.30(typescript@5.9.3))
+      '@gitbeaker/core':
+        specifier: ^40.6.0
+        version: 40.6.0
+      '@gitbeaker/requester-utils':
+        specifier: ^40.6.0
+        version: 40.6.0
       '@gitbeaker/rest':
         specifier: ^40.0.0
         version: 40.6.0
@@ -29,9 +35,18 @@ importers:
       fs-extra:
         specifier: ^11.2.0
         version: 11.3.4
+      picomatch-browser:
+        specifier: ^2.2.6
+        version: 2.2.6
       pinia:
         specifier: ^2.1.0
         version: 2.3.1(typescript@5.9.3)(vue@3.5.30(typescript@5.9.3))
+      qs:
+        specifier: ^6.15.0
+        version: 6.15.0
+      rate-limiter-flexible:
+        specifier: ^10.0.1
+        version: 10.0.1
       ssh2:
         specifier: ^1.15.0
         version: 1.17.0
@@ -41,6 +56,9 @@ importers:
       vue-router:
         specifier: ^5.0.3
         version: 5.0.4(@vue/compiler-sfc@3.5.30)(pinia@2.3.1(typescript@5.9.3)(vue@3.5.30(typescript@5.9.3)))(vue@3.5.30(typescript@5.9.3))
+      xcase:
+        specifier: ^2.0.1
+        version: 2.0.1
       zod:
         specifier: ^3.22.0
         version: 3.25.76
@@ -2129,6 +2147,9 @@ packages:
   quick-lru@5.1.1:
     resolution: {integrity: sha512-WuyALRjWPDGtt/wzJiadO5AXY+8hZ80hVpe6MyivgraREW751X3SbhRvG3eLKOYN+8VEvqLcf3wdnt44Z4S4SA==}
     engines: {node: '>=10'}
+
+  rate-limiter-flexible@10.0.1:
+    resolution: {integrity: sha512-3G6GMFz5Oz5nVnDv9gQ1LLMdExR4B1lOjogPIjehtgyxPMIkY09BGyk2eCYt36/OkV/0t12GEt6J6HpTl6RzZg==}
 
   rate-limiter-flexible@4.0.1:
     resolution: {integrity: sha512-2/dGHpDFpeA0+755oUkW+EKyklqLS9lu0go9pDsbhqQjZcxfRyJ6LA4JI0+HAdZ2bemD/oOjUeZQB2lCZqXQfQ==}
@@ -4744,6 +4765,8 @@ snapshots:
   queue-microtask@1.2.3: {}
 
   quick-lru@5.1.1: {}
+
+  rate-limiter-flexible@10.0.1: {}
 
   rate-limiter-flexible@4.0.1: {}
 
