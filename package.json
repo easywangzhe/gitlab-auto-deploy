@@ -22,7 +22,8 @@
   "build": {
     "appId": "com.gitlab.autodeploy",
     "productName": "GitLab Auto Deploy",
-    "asar": true,
+    "asar": false,
+    "npmRebuild": true,
     "directories": {
       "output": "dist"
     },
@@ -43,7 +44,6 @@
         }
       ]
     },
-    "extraResources": [],
     "files": [
       "out/**/*",
       "node_modules/**/*"
