@@ -19,6 +19,36 @@
     "build:linux": "pnpm build && electron-builder --linux",
     "build:all": "pnpm build && electron-builder --win --mac --linux"
   },
+  "build": {
+    "appId": "com.gitlab.autodeploy",
+    "productName": "GitLab Auto Deploy",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "extraResources": [],
+    "files": [
+      "out/**/*",
+      "node_modules/**/*"
+    ]
+  },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@gitbeaker/rest": "^40.0.0",
