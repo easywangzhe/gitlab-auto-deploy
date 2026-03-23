@@ -12,6 +12,7 @@
     "start": "electron-vite preview",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
     "format": "prettier --write \"src/**/*.{js,ts,vue,scss,json}\"",
+    "postinstall": "electron-builder install-app-deps",
     "build:unpack": "pnpm build && electron-builder --dir",
     "build:win": "pnpm build && electron-builder --win",
     "build:mac": "pnpm build && electron-builder --mac",
@@ -21,7 +22,11 @@
   "build": {
     "appId": "com.gitlab.autodeploy",
     "productName": "GitLab Auto Deploy",
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/@gitbeaker/**/*",
+      "**/node_modules/.pnpm/@gitbeaker+*/**/*"
+    ],
     "directories": {
       "output": "dist"
     },
