@@ -23,7 +23,6 @@
     "appId": "com.gitlab.autodeploy",
     "productName": "GitLab Auto Deploy",
     "asar": false,
-    "npmRebuild": true,
     "directories": {
       "output": "dist"
     },
