@@ -125,8 +125,7 @@ export const GitLabProjectSchema = z.object({
   branch: z.string().min(1).default('main'), // 监听的分支
   targetBranch: z.string().min(1).default('main'), // 部署目标分支
   deployPath: z.string().min(1), // 服务器部署路径
-  healthCheckUrl: z.string().url().optional(), // 健康检查 URL
-  buildCommand: z.string().optional(),
+  healthCheckUrl: z.string().url().optional().or(z.literal('')), // 健康检查 URL
   outputDir: z.string().default('dist'),
   packageManager: PackageManagerEnum.optional(),
   autoDeploy: z.boolean().default(false),

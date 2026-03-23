@@ -20,7 +20,6 @@ const projectForm = ref({
   branch: 'main',
   deployPath: '/var/www/html',
   healthCheckUrl: '',
-  buildCommand: 'npm run build',
   outputDir: 'dist',
   autoDeploy: false
 })
@@ -46,7 +45,6 @@ const openAddDialog = () => {
     branch: 'main',
     deployPath: '/var/www/html',
     healthCheckUrl: '',
-    buildCommand: 'npm run build',
     outputDir: 'dist',
     autoDeploy: false
   }
@@ -63,7 +61,6 @@ const openEditDialog = (project: GitLabProject) => {
     branch: project.branch || 'main',
     deployPath: project.deployPath || '/var/www/html',
     healthCheckUrl: project.healthCheckUrl || '',
-    buildCommand: project.buildCommand || 'npm run build',
     outputDir: project.outputDir || 'dist',
     autoDeploy: project.autoDeploy || false
   }
@@ -166,9 +163,6 @@ const formatDate = (date: Date) => {
         <el-form-item label="健康检查URL">
           <el-input v-model="projectForm.healthCheckUrl" placeholder="例如: https://example.com/health" />
           <div class="form-tip">部署完成后会检查此URL是否返回200状态码，支持重定向</div>
-        </el-form-item>
-        <el-form-item label="构建命令">
-          <el-input v-model="projectForm.buildCommand" placeholder="例如: npm run build" />
         </el-form-item>
         <el-form-item label="输出目录">
           <el-input v-model="projectForm.outputDir" placeholder="例如: dist" />

@@ -163,16 +163,10 @@ class DaemonService {
       // Initialize monitored projects
       await this.initializeMonitoredProjects(settings)
 
-      if (this.monitoredProjects.size === 0) {
-        logService.warn('daemon', 'No projects to monitor. Add projects with autoDeploy enabled.')
-        this.updateStatus('running', null, 0) // Running but nothing to monitor
-        return
-      }
-
       // Start the deployment queue
       deploymentQueue.start()
 
-      // Start polling
+      // Start polling (even if no projects yet, so new projects can be detected)
       const pollingIntervalMs = settings.daemon.pollingInterval || 60000
       this.startPolling(pollingIntervalMs)
 

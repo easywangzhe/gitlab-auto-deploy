@@ -184,7 +184,7 @@ const formatTime = (date: Date) => {
       <template #content>
         <span class="project-title">{{ project?.name || '加载中...' }}</span>
       </template>
-      <template #backContent>
+      <template #title>
         <span>返回</span>
       </template>
     </el-page-header>
@@ -209,14 +209,13 @@ const formatTime = (date: Date) => {
           <el-descriptions-item label="GitLab 路径">{{ project.gitlabPath }}</el-descriptions-item>
           <el-descriptions-item label="监听分支">{{ project.branch }}</el-descriptions-item>
           <el-descriptions-item label="部署路径">{{ project.deployPath }}</el-descriptions-item>
-          <el-descriptions-item label="构建命令">{{ project.buildCommand }}</el-descriptions-item>
           <el-descriptions-item label="输出目录">{{ project.outputDir }}</el-descriptions-item>
           <el-descriptions-item label="自动部署">
             <el-tag :type="project.autoDeploy ? 'success' : 'info'" size="small">
               {{ project.autoDeploy ? '已启用' : '未启用' }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="健康检查URL">{{ project.healthCheckUrl || '未配置' }}</el-descriptions-item>
+          <el-descriptions-item label="健康检查URL" :span="2">{{ project.healthCheckUrl || '未配置' }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ formatDate(project.createdAt) }}</el-descriptions-item>
           <el-descriptions-item label="更新时间">{{ formatDate(project.updatedAt) }}</el-descriptions-item>
         </el-descriptions>

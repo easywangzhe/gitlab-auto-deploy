@@ -32,6 +32,80 @@ export class BuildService {
   }
 
   /**
+   * Get extended PATH for finding node/npm/pnpm executables
+   * Solves the issue where GUI apps don't inherit user's shell PATH
+   */
+  private getEnvPath(): string {
+    const isWindows = process.platform === 'win32'
+    const pathSeparator = isWindows ? ';' : ':'
+    const home = process.env.HOME || process.env.USERPROFILE || ''
+
+    const possiblePaths: string[] = []
+
+    if (isWindows) {
+      // Windows paths
+      possiblePaths.push(
+        path.join(home, 'AppData', 'Roaming', 'npm'),
+        path.join(home, 'AppData', 'Local', 'pnpm'),
+        path.join(home, '.nvm', 'nodejs'), // nvm-windows default
+        'C:\\Program Files\\nodejs',
+        'C:\\Program Files (x86)\\nodejs'
+      )
+
+      // Scan nvm-windows for installed versions
+      const nvmHome = process.env.NVM_HOME || path.join(home, 'AppData', 'Roaming', 'nvm')
+      try {
+        const nvmDir = require('fs').readdirSync(nvmHome)
+        for (const version of nvmDir) {
+          if (/^v?\d+\.\d+\.\d+/.test(version)) {
+            possiblePaths.push(path.join(nvmHome, version))
+          }
+        }
+      } catch {
+        // nvm directory not found, skip
+      }
+    } else {
+      // macOS / Linux paths
+      possiblePaths.push(
+        '/usr/local/bin',
+        '/opt/homebrew/bin',           // Apple Silicon Homebrew
+        '/usr/bin',
+        path.join(home, '.npm-global', 'bin'),
+        path.join(home, '.local', 'bin')
+      )
+
+      // Dynamically scan nvm for all installed Node versions
+      const nvmDir = path.join(home, '.nvm', 'versions', 'node')
+      try {
+        const nvmVersions = require('fs').readdirSync(nvmDir)
+        for (const version of nvmVersions) {
+          possiblePaths.push(path.join(nvmDir, version, 'bin'))
+        }
+      } catch {
+        // nvm directory not found, skip
+      }
+
+      // Also check fnm (Fast Node Manager)
+      const fnmDir = path.join(home, '.fnm', 'node-versions')
+      try {
+        const fnmVersions = require('fs').readdirSync(fnmDir)
+        for (const version of fnmVersions) {
+          possiblePaths.push(path.join(fnmDir, version, 'installation', 'bin'))
+        }
+      } catch {
+        // fnm directory not found, skip
+      }
+    }
+
+    // Filter out empty paths and deduplicate
+    const uniquePaths = [...new Set(possiblePaths.filter(Boolean))]
+
+    logger.info('build', `Extended PATH directories: ${uniquePaths.length} paths`)
+
+    return uniquePaths.join(pathSeparator) + pathSeparator + (process.env.PATH || '')
+  }
+
+  /**
    * Clone a project repository
    * @param project - The project to clone
    * @param branch - The branch to clone
@@ -172,18 +246,23 @@ export class BuildService {
   ): Promise<void> {
     logger.info('build', `Installing dependencies with ${packageManager}`)
 
-    // Use --ignore-scripts to skip lifecycle scripts (husky, etc.) that may fail in CI/deploy environments
-    const commands: Record<PackageManager, string[]> = {
-      npm: ['npm', 'install', '--ignore-scripts'],
-      yarn: ['yarn', 'install', '--ignore-scripts'],
-      pnpm: ['pnpm', 'install', '--ignore-scripts']
+    const shell = process.env.SHELL || '/bin/zsh'
+
+    const commands: Record<PackageManager, string> = {
+      npm: 'npm install --ignore-scripts',
+      yarn: 'yarn install --ignore-scripts',
+      pnpm: 'pnpm install --ignore-scripts'
     }
 
-    const [cmd, ...args] = commands[packageManager]
+    const command = commands[packageManager]
 
-    await execa(cmd, args, {
+    await execa(shell, ['-l', '-c', command], {
       cwd: projectPath,
-      timeout: 300000 // 5 minutes timeout for install
+      timeout: 300000, // 5 minutes timeout for install
+      env: {
+        ...process.env,
+        PATH: this.getEnvPath()
+      }
     })
   }
 
@@ -233,10 +312,15 @@ export class BuildService {
     }
 
     try {
-      const result = await execa('npm', ['run', command], {
+      const shell = process.env.SHELL || '/bin/zsh'
+      const result = await execa(shell, ['-l', '-c', `npm run ${command}`], {
         cwd: projectPath,
         timeout,
-        all: true
+        all: true,
+        env: {
+          ...process.env,
+          PATH: this.getEnvPath()
+        }
       })
 
       // Wait a moment for file system to sync (especially for background processes in build scripts)

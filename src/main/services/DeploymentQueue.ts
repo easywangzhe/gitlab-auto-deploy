@@ -499,30 +499,8 @@ export class DeploymentQueue {
         throw new Error('No deploy path configured for this project')
       }
 
-      // Step 6: Create backup
-      deployService.addDeploymentLog(deploymentId, 'info', 'Creating backup...')
-      logService.info('deploy', `Creating backup for ${project.name}`, {
-        projectId: project.id,
-        deployPath
-      })
-      const backup = await deployService.createBackup(server, credentials, deployPath)
+      // Step 6: Upload artifact (skip server backup, use Git commits for rollback)
       deployService.updateProgress(deploymentId, 65)
-      if (backup) {
-        deployService.addDeploymentLog(deploymentId, 'info', `Backup created: ${backup.path}`)
-        logService.info('deploy', `Backup created: ${backup.path}`, { projectId: project.id })
-      } else {
-        deployService.addDeploymentLog(deploymentId, 'info', 'Skipped backup (deploy path does not exist)')
-        logService.info('deploy', 'Skipped backup - deploy path does not exist', { projectId: project.id, deployPath })
-      }
-
-      this.onDeploymentUpdate?.(deployService.getDeployment(deploymentId)!)
-
-      // Step 7: Upload artifact
-      deployService.updateDeploymentStatus(
-        deploymentId,
-        DeploymentStatusEnum.enum.uploading
-      )
-      deployService.updateProgress(deploymentId, 70)
       deployService.addDeploymentLog(deploymentId, 'info', 'Uploading to server...')
       logService.info('deploy', `Uploading artifact to ${server.host}:${deployPath}`, {
         projectId: project.id,
@@ -565,13 +543,45 @@ export class DeploymentQueue {
             projectId: project.id,
             healthUrl: project.healthCheckUrl
           })
-          if (backup) {
-            deployService.addDeploymentLog(deploymentId, 'warn', 'Initiating rollback...')
-            await deployService.rollback(backup, server, credentials, deployPath)
-            throw new Error('Health check failed, rolled back to previous version')
-          } else {
-            throw new Error('Health check failed, no backup available for rollback')
+
+          // 检查是否为回滚部署
+          if (deployment.isRollback) {
+            // 回滚部署也失败，不再自动回滚
+            deployService.addDeploymentLog(deploymentId, 'error', 'Rollback deployment also failed health check. Manual intervention required.')
+            throw new Error('Rollback deployment health check failed. Manual intervention required.')
           }
+
+          // 获取上一个成功部署的 commit SHA 进行自动回滚
+          const lastSuccessfulSha = this.getLastSuccessfulCommitSha(project.id)
+          if (lastSuccessfulSha && lastSuccessfulSha !== commitSha) {
+            deployService.addDeploymentLog(
+              deploymentId,
+              'warn',
+              `Auto-rolling back to last successful commit: ${lastSuccessfulSha.substring(0, 7)}`
+            )
+            logService.info('deploy', `Auto-rolling back for ${project.name}`, {
+              projectId: project.id,
+              targetSha: lastSuccessfulSha
+            })
+
+            // 异步触发回滚部署
+            this.startRollbackDeployment(project, lastSuccessfulSha, mergeRequest.sourceBranch)
+              .then(rollbackDeploymentId => {
+                logService.info('deploy', `Rollback deployment started: ${rollbackDeploymentId}`, {
+                  projectId: project.id
+                })
+              })
+              .catch(err => {
+                logService.error('deploy', `Failed to start rollback deployment`, {
+                  projectId: project.id,
+                  error: err instanceof Error ? err.message : 'Unknown error'
+                })
+              })
+          } else {
+            deployService.addDeploymentLog(deploymentId, 'warn', 'No previous successful deployment found for auto-rollback')
+          }
+
+          throw new Error('Health check failed. Auto-rollback has been initiated if a previous successful version exists.')
         }
 
         deployService.updateProgress(deploymentId, 90)
@@ -858,8 +868,8 @@ export class DeploymentQueue {
    * 获取当前目录的 commit SHA
    */
   private async getCurrentCommitSha(projectPath: string): Promise<string> {
-    const execa = await import('execa')
-    const result = await execa.execa('git', ['rev-parse', 'HEAD'], { cwd: projectPath })
+    const execa = (await import('execa')).default
+    const result = await execa('git', ['rev-parse', 'HEAD'], { cwd: projectPath })
     return result.stdout.trim()
   }
 }

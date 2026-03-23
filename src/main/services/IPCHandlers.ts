@@ -212,6 +212,7 @@ export async function registerIPCHandlers(): Promise<void> {
 
   ipcMain.handle('projects:create', async (_event, projectData: Omit<GitLabProject, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
+      logger.info('ipc', 'Creating project', { projectData })
       const now = new Date()
       const project: GitLabProject = {
         ...projectData,
@@ -220,7 +221,14 @@ export async function registerIPCHandlers(): Promise<void> {
         updatedAt: now
       }
 
-      GitLabProjectSchema.parse(project)
+      const result = GitLabProjectSchema.safeParse(project)
+      if (!result.success) {
+        logger.error('ipc', 'Project validation failed', { errors: result.error.errors })
+        return {
+          success: false,
+          error: 'Validation failed: ' + result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')
+        }
+      }
       projects.set(project.id, project)
       await saveProject(project)
 
