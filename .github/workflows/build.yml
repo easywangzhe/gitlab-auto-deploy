@@ -46,7 +46,8 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 9
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm rebuild
       - run: pnpm build
       - run: pnpm electron-builder --win --x64 --publish never
         env:
