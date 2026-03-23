@@ -344,6 +344,7 @@ export interface MetricsConfig extends z.infer<typeof MetricsConfigSchema> {}
 export const AppSettingsSchema = z.object({
   gitlabConnection: GitLabConnectionSchema.optional(),
   server: ServerSchema.optional(),
+  theme: z.enum(['light', 'dark', 'auto']).default('auto'),
   notifications: z.object({
     enabled: z.boolean().default(true),
     notifyOnSuccess: z.boolean().default(true),

@@ -36,3 +36,62 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #a1a1a1;
 }
+
+/* Dark mode styles */
+html.dark {
+  color-scheme: dark;
+
+  body {
+    background-color: #141414;
+    color: #e5eaf3;
+  }
+
+  /* Dark scrollbar */
+  ::-webkit-scrollbar-track {
+    background: #1d1d1d;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #4c4c4c;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #5c5c5c;
+  }
+
+  /* Card backgrounds */
+  .el-card {
+    --el-card-bg-color: #1d1d1d;
+  }
+
+  /* Menu backgrounds */
+  .el-menu {
+    --el-menu-bg-color: #1d1d1d;
+    --el-menu-text-color: #e5eaf3;
+  }
+
+  /* Table styles */
+  .el-table {
+    --el-table-bg-color: #1d1d1d;
+    --el-table-tr-bg-color: #1d1d1d;
+    --el-table-header-bg-color: #252525;
+    --el-table-row-hover-bg-color: #2d2d2d;
+    --el-table-text-color: #e5eaf3;
+    --el-table-header-text-color: #e5eaf3;
+  }
+
+  /* Descriptions */
+  .el-descriptions {
+    --el-descriptions-item-bordered-label-background: #252525;
+  }
+
+  /* Log view background */
+  .log-view {
+    background-color: #0d0d0d;
+  }
+
+  /* Form tip color */
+  .form-tip {
+    color: #909399;
+  }
+}

@@ -91,7 +91,7 @@ jobs:
             由于应用未经过 Apple 公证，首次打开会提示"已损坏"。请在终端运行以下命令解决：
 
             ```bash
-            sudo xattr -cr /Applications/gitlab-auto-deploy.app
+            sudo xattr -cr /Applications/GitLab Auto Deploy.app
             ```
 
             然后即可正常打开应用。

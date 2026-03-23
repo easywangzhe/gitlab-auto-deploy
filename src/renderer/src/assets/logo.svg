@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- GitLab orange background circle -->
+  <circle cx="16" cy="16" r="15" fill="#E24329"/>
+
+  <!-- Git branch symbol (simplified) -->
+  <g fill="white">
+    <!-- Left circle -->
+    <circle cx="10" cy="10" r="2.5"/>
+    <!-- Right circle -->
+    <circle cx="22" cy="10" r="2.5"/>
+    <!-- Center top circle -->
+    <circle cx="16" cy="8" r="3"/>
+
+    <!-- Vertical lines -->
+    <rect x="15" y="10" width="2" height="10" rx="1"/>
+    <rect x="9" y="10" width="2" height="8" rx="1"/>
+    <rect x="21" y="10" width="2" height="8" rx="1"/>
+  </g>
+
+  <!-- Upload arrow -->
+  <polygon points="16,15 20,22 18,22 18,26 14,26 14,22 12,22" fill="white"/>
+</svg>

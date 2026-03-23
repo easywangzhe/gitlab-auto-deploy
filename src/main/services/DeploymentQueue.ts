@@ -21,7 +21,7 @@ import { logService } from './LogService'
 import { logger } from '../utils/logger'
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import { app } from 'electron'
+import { app, Notification } from 'electron'
 
 interface QueueItem {
   deploymentId: string
@@ -619,6 +619,14 @@ export class DeploymentQueue {
       // Trigger webhook for deployment success
       webhookService.trigger('deployment.success', deployService.getDeployment(deploymentId)!, project, mergeRequest)
 
+      // Send system notification if enabled
+      if (settings?.notifications?.notifyOnSuccess) {
+        this.sendNotification(
+          '部署成功',
+          `项目 "${project.name}" 部署完成`
+        )
+      }
+
       this.onDeploymentUpdate?.(deployService.getDeployment(deploymentId)!)
 
     } catch (error) {
@@ -637,6 +645,14 @@ export class DeploymentQueue {
 
       // Trigger webhook for deployment failure
       webhookService.trigger('deployment.failed', deployService.getDeployment(deploymentId)!, project, mergeRequest)
+
+      // Send system notification if enabled
+      if (settings?.notifications?.notifyOnFailure) {
+        this.sendNotification(
+          '部署失败',
+          `项目 "${project.name}" 部署失败: ${errorMessage}`
+        )
+      }
 
       this.onDeploymentUpdate?.(deployService.getDeployment(deploymentId)!)
 
@@ -871,6 +887,16 @@ export class DeploymentQueue {
     const execa = (await import('execa')).default
     const result = await execa('git', ['rev-parse', 'HEAD'], { cwd: projectPath })
     return result.stdout.trim()
+  }
+
+  /**
+   * 发送系统通知
+   */
+  private sendNotification(title: string, body: string): void {
+    if (Notification.isSupported()) {
+      const notification = new Notification({ title, body })
+      notification.show()
+    }
   }
 }
 

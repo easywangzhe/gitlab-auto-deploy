@@ -317,4 +317,41 @@ onUnmounted(() => {
     }
   }
 }
+
+/* Dark mode styles */
+html.dark {
+  .logs-view {
+    .logs-card {
+      :deep(.el-card__header) {
+        border-bottom-color: #333;
+      }
+    }
+
+    .log-stats {
+      border-bottom-color: #333;
+      background: #1d1d1d;
+    }
+
+    .log-entry {
+      background: #1d1d1d;
+
+      .log-message {
+        color: #e5eaf3;
+      }
+
+      .log-data {
+        background: #0d0d0d;
+        color: #e5eaf3;
+      }
+
+      &.log-level-warn {
+        background: #2a2518;
+      }
+
+      &.log-level-error {
+        background: #2a1a1a;
+      }
+    }
+  }
+}
 </style>

@@ -14,8 +14,35 @@ const settings = computed(() => settingsStore.settings)
 
 const daemonEnabled = ref(false)
 const pollingInterval = ref(60000)
+const theme = ref<'light' | 'dark' | 'auto'>('auto')
 const notifyOnSuccess = ref(true)
 const notifyOnFailure = ref(true)
+
+// 应用主题到 DOM
+const applyTheme = (themeValue: 'light' | 'dark' | 'auto') => {
+  const html = document.documentElement
+  let isDark = false
+
+  if (themeValue === 'dark') {
+    isDark = true
+  } else if (themeValue === 'auto') {
+    isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  }
+
+  if (isDark) {
+    html.classList.add('dark')
+  } else {
+    html.classList.remove('dark')
+  }
+}
+
+// 监听系统主题变化
+let mediaQuery: MediaQueryList | null = null
+const handleSystemThemeChange = (e: MediaQueryListEvent) => {
+  if (theme.value === 'auto') {
+    applyTheme('auto')
+  }
+}
 
 onMounted(async () => {
   loading.value = true
@@ -29,6 +56,14 @@ onMounted(async () => {
       notifyOnSuccess.value = settings.value.notifications.notifyOnSuccess ?? true
       notifyOnFailure.value = settings.value.notifications.notifyOnFailure ?? true
     }
+    theme.value = settings.value?.theme || 'auto'
+
+    // 应用初始主题
+    applyTheme(theme.value)
+
+    // 监听系统主题变化
+    mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    mediaQuery.addEventListener('change', handleSystemThemeChange)
   } finally {
     loading.value = false
   }
@@ -40,6 +75,7 @@ const autoSaveSettings = async (startStopDaemon = false) => {
     const currentSettings = settings.value ? JSON.parse(JSON.stringify(settings.value)) : {}
     await settingsStore.saveSettings({
       ...currentSettings,
+      theme: theme.value,
       daemon: {
         enabled: daemonEnabled.value,
         pollingInterval: pollingInterval.value
@@ -89,8 +125,13 @@ const onDaemonEnabledChange = async (enabled: boolean) => {
 }
 
 // 监听其他设置变化，自动保存
-watch([pollingInterval, notifyOnSuccess, notifyOnFailure], () => {
+watch([theme, pollingInterval, notifyOnSuccess, notifyOnFailure], () => {
   autoSaveSettings()
+})
+
+// 主题变化时立即应用
+watch(theme, (newTheme) => {
+  applyTheme(newTheme)
 })
 
 const navigateTo = (path: string) => {
@@ -127,6 +168,16 @@ const navigateTo = (path: string) => {
           </template>
 
           <el-form label-width="120px">
+            <el-divider content-position="left">外观设置</el-divider>
+
+            <el-form-item label="主题模式">
+              <el-radio-group v-model="theme">
+                <el-radio-button value="light">浅色</el-radio-button>
+                <el-radio-button value="dark">深色</el-radio-button>
+                <el-radio-button value="auto">跟随系统</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
             <el-divider content-position="left">守护进程</el-divider>
 
             <el-form-item label="启用守护进程">

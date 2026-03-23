@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import 'element-plus/dist/index.css'
+import 'element-plus/theme-chalk/dark/css-vars.css'
 import App from './App.vue'
 import router from './router'
 import './styles/global.scss'
@@ -27,6 +28,11 @@ setupIPCListeners()
 
 // Load initial data from main process
 initializeStores().catch(console.error)
+
+// Initialize theme
+import('./composables/useTheme').then(({ useTheme }) => {
+  // Theme will be initialized by the composable
+})
 
 // Cleanup on app unload (for HMR during development)
 if (import.meta.hot) {

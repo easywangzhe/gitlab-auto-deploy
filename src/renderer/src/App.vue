@@ -1,15 +1,63 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useSettingsStore } from './stores/settings'
+import logoSvg from './assets/logo.svg'
 
 const route = useRoute()
 const router = useRouter()
+const settingsStore = useSettingsStore()
 
 const currentPath = computed(() => route.path)
 
 const navigateTo = (path: string) => {
   router.push(path)
 }
+
+// 主题初始化和应用
+const applyTheme = (themeValue: 'light' | 'dark' | 'auto') => {
+  const html = document.documentElement
+  let isDark = false
+
+  if (themeValue === 'dark') {
+    isDark = true
+  } else if (themeValue === 'auto') {
+    isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  }
+
+  if (isDark) {
+    html.classList.add('dark')
+  } else {
+    html.classList.remove('dark')
+  }
+}
+
+// 监听系统主题变化
+let mediaQuery: MediaQueryList | null = null
+const handleSystemThemeChange = () => {
+  const theme = settingsStore.settings?.theme || 'auto'
+  if (theme === 'auto') {
+    applyTheme('auto')
+  }
+}
+
+onMounted(async () => {
+  // 加载设置并应用主题
+  await settingsStore.loadSettings()
+  const theme = settingsStore.settings?.theme || 'auto'
+  applyTheme(theme)
+
+  // 监听系统主题变化
+  mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  mediaQuery.addEventListener('change', handleSystemThemeChange)
+})
+
+// 监听主题设置变化
+watch(() => settingsStore.settings?.theme, (newTheme) => {
+  if (newTheme) {
+    applyTheme(newTheme)
+  }
+})
 </script>
 
 <template>
@@ -17,16 +65,13 @@ const navigateTo = (path: string) => {
     <!-- Sidebar -->
     <el-aside width="220px" class="sidebar">
       <div class="logo">
-        <el-icon size="24"><Upload /></el-icon>
+        <img :src="logoSvg" alt="Logo" class="logo-icon" />
         <span>GitLab 自动部署</span>
       </div>
 
       <el-menu
         :default-active="currentPath"
         class="sidebar-menu"
-        background-color="#304156"
-        text-color="#bfcbd9"
-        active-text-color="#409eff"
         router
       >
         <el-menu-item index="/projects">
@@ -133,6 +178,11 @@ html, body, #app {
     font-weight: 600;
     border-bottom: 1px solid #3a4758;
 
+    .logo-icon {
+      width: 28px;
+      height: 28px;
+    }
+
     .el-icon {
       color: #409eff;
     }
@@ -142,12 +192,15 @@ html, body, #app {
     flex: 1;
     border-right: none;
     overflow-y: auto;
+    background-color: #304156;
 
     &:not(.el-menu--collapse) {
       width: 100%;
     }
 
     .el-menu-item {
+      color: #bfcbd9;
+
       &:hover {
         background-color: #263445 !important;
       }
@@ -155,10 +208,25 @@ html, body, #app {
       &.is-active {
         background-color: #263445 !important;
         border-right: 3px solid #409eff;
+        color: #409eff;
       }
     }
 
     .el-sub-menu {
+      .el-sub-menu__title {
+        color: #bfcbd9 !important;
+
+        &:hover {
+          background-color: #263445 !important;
+        }
+      }
+
+      &.is-active {
+        .el-sub-menu__title {
+          color: #409eff !important;
+        }
+      }
+
       .el-menu {
         background-color: #1f2d3d !important;
       }
@@ -166,6 +234,16 @@ html, body, #app {
       .el-menu-item {
         padding-left: 50px !important;
         min-width: auto;
+        color: #bfcbd9;
+
+        &:hover {
+          background-color: #001528 !important;
+        }
+
+        &.is-active {
+          background-color: #263445 !important;
+          color: #409eff;
+        }
       }
     }
   }
@@ -222,5 +300,68 @@ html, body, #app {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* Dark mode styles */
+html.dark {
+  .sidebar {
+    background-color: #1d1d1d;
+
+    .logo {
+      border-bottom-color: #333;
+    }
+
+    .sidebar-menu {
+      background-color: #1d1d1d;
+
+      .el-menu-item {
+        color: #e5eaf3;
+
+        &:hover {
+          background-color: #252525 !important;
+        }
+
+        &.is-active {
+          background-color: #252525 !important;
+        }
+      }
+
+      .el-sub-menu {
+        .el-sub-menu__title {
+          color: #e5eaf3 !important;
+
+          &:hover {
+            background-color: #252525 !important;
+          }
+        }
+
+        .el-menu {
+          background-color: #141414 !important;
+        }
+
+        .el-menu-item {
+          color: #e5eaf3;
+
+          &:hover {
+            background-color: #0a0a0a !important;
+          }
+        }
+      }
+    }
+
+    .sidebar-footer {
+      border-top-color: #333;
+    }
+  }
+
+  .app-header {
+    background-color: #1d1d1d;
+    border-bottom-color: #333;
+    color: #e5eaf3;
+  }
+
+  .app-main {
+    background-color: #141414;
+  }
 }
 </style>

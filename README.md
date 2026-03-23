@@ -12,11 +12,6 @@
 - **实时日志**: 查看部署过程的详细日志
 - **系统通知**: 部署成功/失败时发送桌面通知
 
-## 截图
-
-![项目列表](docs/screenshots/projects.png)
-![部署详情](docs/screenshots/deployment.png)
-
 ## 安装
 
 ### 下载安装包
