@@ -357,6 +357,9 @@ export class DeploymentQueue {
       // Track start time for metrics
       const startTime = Date.now()
 
+      // Get settings once at the beginning (used for notifications in catch block)
+      const settings = getSettings()
+
       // Notify update
       this.onDeploymentUpdate?.(deployService.getDeployment(deploymentId)!)
 
@@ -374,8 +377,9 @@ export class DeploymentQueue {
       })
 
       // Get GitLab connection settings for cloning
-      const settings = getSettings()
-      const gitlabConnection = settings?.gitlabConnection
+      const gitlabConnection = settings?.gitlabConnections?.find(
+        c => c.id === project.gitlabConnectionId
+      )
       const gitlabUrl = gitlabConnection?.apiUrl
       const gitlabToken = gitlabConnection?.token
 
@@ -432,17 +436,22 @@ export class DeploymentQueue {
       logService.debug('build', 'Detecting build command', { projectId: project.id })
       const buildCommand = await buildService.detectBuildCommand(projectPath)
 
-      if (!buildCommand) {
+      if (!buildCommand && !project.buildCommand) {
         logService.error('build', `No build command found for ${project.name}`, { projectId: project.id })
         throw new Error('No build command found in package.json')
       }
 
-      deployService.addDeploymentLog(deploymentId, 'info', `Running build: ${buildCommand}`)
-      logService.info('build', `Running build: ${buildCommand}`, {
+      // 使用自定义构建命令或自动检测的命令
+      const finalBuildCommand = project.buildCommand || buildCommand
+      const displayCommand = project.buildCommand ? project.buildCommand : `npm run ${buildCommand}`
+
+      deployService.addDeploymentLog(deploymentId, 'info', `Running build: ${displayCommand}`)
+      logService.info('build', `Running build: ${displayCommand}`, {
         projectId: project.id,
-        command: buildCommand
+        command: displayCommand,
+        customCommand: !!project.buildCommand
       })
-      const buildJob = await buildService.build(projectPath, buildCommand)
+      const buildJob = await buildService.build(projectPath, buildCommand, 600000, project.buildCommand)
 
       if (buildJob.status === 'failed') {
         logService.error('build', `Build failed for ${project.name}`, {
@@ -662,7 +671,7 @@ export class DeploymentQueue {
 
   /**
    * Get deployment configuration (server + credentials)
-   * Uses global server configuration from settings
+   * Uses server configuration from project's serverId
    */
   private async getDeploymentConfig(projectId: string): Promise<{
     server: import('../../shared/types').Server
@@ -676,18 +685,19 @@ export class DeploymentQueue {
         return null
       }
 
-      // Step 2: Get settings to find global server
+      // Step 2: Get settings to find the server
       const settings = getSettings()
       if (!settings) {
         logger.error('queue', 'Settings not loaded')
         return null
       }
 
-      // Step 3: Get global server configuration
-      const server = settings.server
+      // Step 3: Get server configuration from project's serverId
+      const server = settings.servers?.find(s => s.id === project.serverId)
       if (!server) {
-        logger.error('queue', 'No server configured in settings', {
-          projectId
+        logger.error('queue', 'Server not found for project', {
+          projectId,
+          serverId: project.serverId
         })
         return null
       }

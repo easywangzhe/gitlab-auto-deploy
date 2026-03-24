@@ -207,20 +207,14 @@ const getLogLevelType = (level: string): string => {
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="viewLogs(row)">日志</el-button>
-            <el-button
-              size="small"
-              type="primary"
-              link
-              @click="openWorkspace(row.projectId)"
-            >
-              目录
-            </el-button>
+            <el-button size="small" link @click="viewLogs(row)">日志</el-button>
+            <el-button size="small" link type="primary" @click="openWorkspace(row.projectId)">目录</el-button>
             <el-button
               v-if="row.status === 'pending' || row.status === 'cloning' || row.status === 'installing' || row.status === 'building' || row.status === 'uploading' || row.status === 'health_check'"
               size="small"
+              link
               type="danger"
               @click="cancelDeployment(row.id)"
             >
@@ -229,8 +223,8 @@ const getLogLevelType = (level: string): string => {
             <el-button
               v-if="row.status === 'success' || row.status === 'failed' || row.status === 'cancelled'"
               size="small"
-              type="danger"
               link
+              type="danger"
               @click="handleDelete(row.id)"
             >
               删除

@@ -294,12 +294,13 @@ export class BuildService {
   async build(
     projectPath: string,
     command: string,
-    timeout: number = 600000
+    timeout: number = 600000,
+    customBuildCommand?: string // 自定义构建命令，如 "npm run build:prod"
   ): Promise<BuildJob> {
     const jobId = crypto.randomUUID()
     const startTime = new Date()
 
-    logger.info('build', `Starting build job ${jobId}`, { command, timeout })
+    logger.info('build', `Starting build job ${jobId}`, { command, customBuildCommand, timeout })
 
     const job: BuildJob = {
       id: jobId,
@@ -313,7 +314,11 @@ export class BuildService {
 
     try {
       const shell = process.env.SHELL || '/bin/zsh'
-      const result = await execa(shell, ['-l', '-c', `npm run ${command}`], {
+
+      // 如果有自定义构建命令，直接使用；否则使用自动检测的命令
+      const buildCommand = customBuildCommand || `npm run ${command}`
+
+      const result = await execa(shell, ['-l', '-c', buildCommand], {
         cwd: projectPath,
         timeout,
         all: true,

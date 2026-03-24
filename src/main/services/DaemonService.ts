@@ -365,11 +365,14 @@ class DaemonService {
   ): Promise<void> {
     const { project, targetBranch, lastCheckTime } = monitored
 
-    // Get the GitLab connection from global settings
-    const connection = settings.gitlabConnection
+    // Get the GitLab connection from project's gitlabConnectionId
+    const connection = settings.gitlabConnections?.find(
+      c => c.id === project.gitlabConnectionId
+    )
     if (!connection) {
-      logService.warn('gitlab-poll', 'GitLab connection not configured', {
-        projectId: project.id
+      logService.warn('gitlab-poll', 'GitLab connection not found for project', {
+        projectId: project.id,
+        connectionId: project.gitlabConnectionId
       })
       return
     }

@@ -81,25 +81,16 @@ async function loadData(): Promise<void> {
     const settingsData = await fs.readFile(getSettingsPath(), 'utf-8')
     const parsedData = JSON.parse(settingsData)
 
-    // Migration: Handle old array format
-    if (parsedData.gitlabConnections && Array.isArray(parsedData.gitlabConnections)) {
-      logger.warn('ipc', 'Migrating settings from array format to single instance format')
-      if (parsedData.gitlabConnections.length > 0) {
-        parsedData.gitlabConnection = parsedData.gitlabConnections[0]
-        if (parsedData.gitlabConnections.length > 1) {
-          logger.warn('ipc', `Multiple GitLab connections found, only the first one will be preserved`)
-        }
-      }
-      delete parsedData.gitlabConnections
+    // Migration: Handle old single instance format -> array format
+    if (parsedData.gitlabConnection && !parsedData.gitlabConnections) {
+      logger.info('ipc', 'Migrating gitlabConnection to gitlabConnections array')
+      parsedData.gitlabConnections = [parsedData.gitlabConnection]
+      delete parsedData.gitlabConnection
     }
-    if (parsedData.servers && Array.isArray(parsedData.servers)) {
-      if (parsedData.servers.length > 0) {
-        parsedData.server = parsedData.servers[0]
-        if (parsedData.servers.length > 1) {
-          logger.warn('ipc', `Multiple servers found, only the first one will be preserved`)
-        }
-      }
-      delete parsedData.servers
+    if (parsedData.server && !parsedData.servers) {
+      logger.info('ipc', 'Migrating server to servers array')
+      parsedData.servers = [parsedData.server]
+      delete parsedData.server
     }
 
     // Use safeParse to see validation errors
@@ -114,6 +105,8 @@ async function loadData(): Promise<void> {
   } catch (error) {
     logger.error('ipc', 'Failed to load settings', { error: error instanceof Error ? error.message : 'Unknown error' })
     settings = {
+      gitlabConnections: [],
+      servers: [],
       notifications: {
         enabled: true,
         notifyOnSuccess: true,
@@ -131,13 +124,36 @@ async function loadData(): Promise<void> {
     const projectFiles = await fs.readdir(getProjectsPath())
     for (const file of projectFiles) {
       if (file.endsWith('.json')) {
-        const data = await fs.readFile(path.join(getProjectsPath(), file), 'utf-8')
-        const parsed = JSON.parse(data)
-        // Convert date strings to Date objects
-        if (parsed.createdAt) parsed.createdAt = new Date(parsed.createdAt)
-        if (parsed.updatedAt) parsed.updatedAt = new Date(parsed.updatedAt)
-        const project = GitLabProjectSchema.parse(parsed)
-        projects.set(project.id, project)
+        try {
+          const data = await fs.readFile(path.join(getProjectsPath(), file), 'utf-8')
+          const parsed = JSON.parse(data)
+          // Convert date strings to Date objects
+          if (parsed.createdAt) parsed.createdAt = new Date(parsed.createdAt)
+          if (parsed.updatedAt) parsed.updatedAt = new Date(parsed.updatedAt)
+
+          // Migration: Add gitlabConnectionId and serverId if missing
+          if (!parsed.gitlabConnectionId && settings?.gitlabConnections?.length) {
+            parsed.gitlabConnectionId = settings.gitlabConnections[0].id
+            logger.info('ipc', `Migrating project ${parsed.name}: added gitlabConnectionId`)
+          }
+          if (!parsed.serverId && settings?.servers?.length) {
+            parsed.serverId = settings.servers[0].id
+            logger.info('ipc', `Migrating project ${parsed.name}: added serverId`)
+          }
+
+          const project = GitLabProjectSchema.parse(parsed)
+          projects.set(project.id, project)
+
+          // Save migrated project back to disk
+          if (parsed.gitlabConnectionId !== project.gitlabConnectionId ||
+              parsed.serverId !== project.serverId) {
+            await saveProject(project)
+          }
+        } catch (parseError) {
+          logger.error('ipc', `Failed to parse project file ${file}`, {
+            error: parseError instanceof Error ? parseError.message : 'Unknown error'
+          })
+        }
       }
     }
   } catch (error) {
@@ -151,7 +167,7 @@ async function loadData(): Promise<void> {
 
   // Initialize monitored projects for daemon
   const currentSettings = getSettings()
-  if (currentSettings?.daemon?.enabled && currentSettings?.gitlabConnection) {
+  if (currentSettings?.daemon?.enabled && currentSettings?.gitlabConnections?.length) {
     for (const project of projects.values()) {
       if (project.autoDeploy) {
         daemonService.addMonitoredProject(
@@ -232,8 +248,8 @@ export async function registerIPCHandlers(): Promise<void> {
       projects.set(project.id, project)
       await saveProject(project)
 
-      // Add to daemon monitoring if auto-deploy is enabled and GitLab connection exists
-      if (project.autoDeploy && settings?.gitlabConnection) {
+      // Add to daemon monitoring if auto-deploy is enabled
+      if (project.autoDeploy) {
         daemonService.addMonitoredProject(
           project,
           project.branch || 'main'
@@ -271,7 +287,7 @@ export async function registerIPCHandlers(): Promise<void> {
       await saveProject(updated)
 
       // Update daemon monitoring if auto-deploy setting changed
-      if (updated.autoDeploy && settings?.gitlabConnection) {
+      if (updated.autoDeploy) {
         daemonService.updateMonitoredProject(
           updated,
           updated.branch || 'main'
@@ -469,69 +485,174 @@ export async function registerIPCHandlers(): Promise<void> {
 
   // ==================== GitLab Connections ====================
 
-  ipcMain.handle('gitlab-connection:save', async (_event, connectionData: Omit<GitLabConnection, 'id'>) => {
+  ipcMain.handle('gitlab-connections:list', async () => {
+    return { success: true, data: settings?.gitlabConnections || [] }
+  })
+
+  ipcMain.handle('gitlab-connections:get', async (_event, id: string) => {
+    const connection = settings?.gitlabConnections?.find(c => c.id === id)
+    return { success: !!connection, data: connection || null, error: connection ? undefined : 'Connection not found' }
+  })
+
+  ipcMain.handle('gitlab-connections:create', async (_event, connectionData: Omit<GitLabConnection, 'id'>) => {
     try {
       const connection: GitLabConnection = {
         ...connectionData,
-        id: settings?.gitlabConnection?.id || generateId()
+        id: generateId()
       }
 
       GitLabConnectionSchema.parse(connection)
-      settings!.gitlabConnection = connection
+      if (!settings!.gitlabConnections) {
+        settings!.gitlabConnections = []
+      }
+      settings!.gitlabConnections.push(connection)
       await saveSettingsData()
 
       return { success: true, data: connection }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to save connection'
+        error: error instanceof Error ? error.message : 'Failed to create connection'
       }
     }
   })
 
-  ipcMain.handle('gitlab-connection:clear', async () => {
-    settings!.gitlabConnection = undefined
-    await saveSettingsData()
-    return { success: true }
+  ipcMain.handle('gitlab-connections:update', async (_event, id: string, updates: Partial<GitLabConnection>) => {
+    try {
+      const index = settings?.gitlabConnections?.findIndex(c => c.id === id)
+      if (index === undefined || index === -1) {
+        return { success: false, error: 'Connection not found' }
+      }
+
+      const updated: GitLabConnection = {
+        ...settings!.gitlabConnections![index],
+        ...updates,
+        id // Ensure ID cannot be changed
+      }
+
+      GitLabConnectionSchema.parse(updated)
+      settings!.gitlabConnections![index] = updated
+      await saveSettingsData()
+
+      return { success: true, data: updated }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update connection'
+      }
+    }
   })
 
-  ipcMain.handle('gitlab-connection:test', async (_event, apiUrl: string, token: string) => {
+  ipcMain.handle('gitlab-connections:delete', async (_event, id: string) => {
+    try {
+      const index = settings?.gitlabConnections?.findIndex(c => c.id === id)
+      if (index === undefined || index === -1) {
+        return { success: false, error: 'Connection not found' }
+      }
+
+      settings!.gitlabConnections!.splice(index, 1)
+      await saveSettingsData()
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete connection'
+      }
+    }
+  })
+
+  ipcMain.handle('gitlab-connections:test', async (_event, apiUrl: string, token: string) => {
     const success = await credentialService.testGitLabConnection(apiUrl, token)
     return { success: true, data: success }
   })
 
   // ==================== Servers ====================
 
-  ipcMain.handle('server:save', async (_event, serverData: Omit<Server, 'id'>) => {
+  ipcMain.handle('servers:list', async () => {
+    return { success: true, data: settings?.servers || [] }
+  })
+
+  ipcMain.handle('servers:get', async (_event, id: string) => {
+    const server = settings?.servers?.find(s => s.id === id)
+    return { success: !!server, data: server || null, error: server ? undefined : 'Server not found' }
+  })
+
+  ipcMain.handle('servers:create', async (_event, serverData: Omit<Server, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
       const now = new Date()
       const server: Server = {
         ...serverData,
-        id: settings?.server?.id || generateId(),
-        createdAt: settings?.server?.createdAt || now,
+        id: generateId(),
+        createdAt: now,
         updatedAt: now
       }
 
       ServerSchema.parse(server)
-      settings!.server = server
+      if (!settings!.servers) {
+        settings!.servers = []
+      }
+      settings!.servers.push(server)
       await saveSettingsData()
 
       return { success: true, data: server }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to save server'
+        error: error instanceof Error ? error.message : 'Failed to create server'
       }
     }
   })
 
-  ipcMain.handle('server:clear', async () => {
-    settings!.server = undefined
-    await saveSettingsData()
-    return { success: true }
+  ipcMain.handle('servers:update', async (_event, id: string, updates: Partial<Server>) => {
+    try {
+      const index = settings?.servers?.findIndex(s => s.id === id)
+      if (index === undefined || index === -1) {
+        return { success: false, error: 'Server not found' }
+      }
+
+      const now = new Date()
+      const updated: Server = {
+        ...settings!.servers![index],
+        ...updates,
+        id, // Ensure ID cannot be changed
+        createdAt: settings!.servers![index].createdAt,
+        updatedAt: now
+      }
+
+      ServerSchema.parse(updated)
+      settings!.servers![index] = updated
+      await saveSettingsData()
+
+      return { success: true, data: updated }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update server'
+      }
+    }
   })
 
-  ipcMain.handle('server:test-ssh', async (
+  ipcMain.handle('servers:delete', async (_event, id: string) => {
+    try {
+      const index = settings?.servers?.findIndex(s => s.id === id)
+      if (index === undefined || index === -1) {
+        return { success: false, error: 'Server not found' }
+      }
+
+      settings!.servers!.splice(index, 1)
+      await saveSettingsData()
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete server'
+      }
+    }
+  })
+
+  ipcMain.handle('servers:test-ssh', async (
     _event,
     host: string,
     port: number,
@@ -559,9 +680,16 @@ export async function registerIPCHandlers(): Promise<void> {
 
   // ==================== GitLab Service ====================
 
-  ipcMain.handle('gitlab:fetch-projects', async () => {
+  ipcMain.handle('gitlab:fetch-projects', async (_event, connectionId?: string) => {
     try {
-      const connection = settings?.gitlabConnection
+      let connection: GitLabConnection | undefined
+      if (connectionId) {
+        connection = settings?.gitlabConnections?.find(c => c.id === connectionId)
+      } else {
+        // Backward compatibility: use first connection if no ID specified
+        connection = settings?.gitlabConnections?.[0]
+      }
+
       if (!connection) {
         return { success: false, error: 'GitLab connection not configured' }
       }
@@ -578,8 +706,20 @@ export async function registerIPCHandlers(): Promise<void> {
     }
   })
 
-  ipcMain.handle('gitlab:fetch-mrs', async (_event, projectId: string, targetBranch: string) => {
+  ipcMain.handle('gitlab:fetch-mrs', async (_event, projectId: string, targetBranch: string, connectionId?: string) => {
     try {
+      let connection: GitLabConnection | undefined
+      if (connectionId) {
+        connection = settings?.gitlabConnections?.find(c => c.id === connectionId)
+      } else {
+        connection = settings?.gitlabConnections?.[0]
+      }
+
+      if (!connection) {
+        return { success: false, error: 'GitLab connection not configured' }
+      }
+
+      await gitLabService.connect(connection)
       const mrs = await gitLabService.fetchMergeRequests(projectId, targetBranch)
       return { success: true, data: mrs }
     } catch (error) {
@@ -729,9 +869,15 @@ export async function registerIPCHandlers(): Promise<void> {
 
   // ==================== Git-based Rollback ====================
 
-  ipcMain.handle('gitlab:get-commits', async (_event, projectId: string, branch: string, limit?: number) => {
+  ipcMain.handle('gitlab:get-commits', async (_event, projectId: string, branch: string, limit?: number, connectionId?: string) => {
     try {
-      const connection = settings?.gitlabConnection
+      let connection: GitLabConnection | undefined
+      if (connectionId) {
+        connection = settings?.gitlabConnections?.find(c => c.id === connectionId)
+      } else {
+        connection = settings?.gitlabConnections?.[0]
+      }
+
       if (!connection) {
         return { success: false, error: 'GitLab connection not configured' }
       }

@@ -61,14 +61,20 @@ interface ElectronAPI {
   getSettings: () => Promise<IPCResult<AppSettings>>
   saveSettings: (settings: AppSettings) => Promise<IPCResult<AppSettings>>
 
-  // GitLab Connections
-  saveGitLabConnection: (connection: Omit<GitLabConnection, 'id'>) => Promise<IPCResult<GitLabConnection>>
-  clearGitLabConnection: () => Promise<IPCResult<void>>
+  // GitLab Connections (multi-connection support)
+  getGitLabConnections: () => Promise<IPCResult<GitLabConnection[]>>
+  getGitLabConnection: (id: string) => Promise<IPCResult<GitLabConnection | null>>
+  createGitLabConnection: (connection: Omit<GitLabConnection, 'id'>) => Promise<IPCResult<GitLabConnection>>
+  updateGitLabConnection: (id: string, updates: Partial<GitLabConnection>) => Promise<IPCResult<GitLabConnection>>
+  deleteGitLabConnection: (id: string) => Promise<IPCResult<void>>
   testGitLabConnection: (apiUrl: string, token: string) => Promise<IPCResult<boolean>>
 
-  // Servers
-  saveServer: (server: Omit<Server, 'id'>) => Promise<IPCResult<Server>>
-  clearServer: () => Promise<IPCResult<void>>
+  // Servers (multi-server support)
+  getServers: () => Promise<IPCResult<Server[]>>
+  getServer: (id: string) => Promise<IPCResult<Server | null>>
+  createServer: (server: Omit<Server, 'id' | 'createdAt' | 'updatedAt'>) => Promise<IPCResult<Server>>
+  updateServer: (id: string, updates: Partial<Server>) => Promise<IPCResult<Server>>
+  deleteServer: (id: string) => Promise<IPCResult<void>>
   testSSHConnection: (
     host: string,
     port: number,
@@ -82,8 +88,8 @@ interface ElectronAPI {
   showNotification: (options: { title: string; body: string; type?: string }) => Promise<IPCResult<void>>
 
   // GitLab Service
-  fetchGitLabProjects: () => Promise<IPCResult<GitLabProject[]>>
-  fetchMergeRequests: (projectId: string, targetBranch: string) => Promise<IPCResult<MergeRequest[]>>
+  fetchGitLabProjects: (connectionId?: string) => Promise<IPCResult<GitLabProject[]>>
+  fetchMergeRequests: (projectId: string, targetBranch: string, connectionId?: string) => Promise<IPCResult<MergeRequest[]>>
 
   // Daemon
   startDaemon: () => Promise<IPCResult<void>>
@@ -121,7 +127,7 @@ interface ElectronAPI {
   getLogStats: () => Promise<IPCResult<Record<LogCategory, { count: number; maxSize: number }>>>
 
   // Git-based Rollback
-  getBranchCommits: (projectId: string, branch: string, limit?: number) => Promise<IPCResult<CommitInfo[]>>
+  getBranchCommits: (projectId: string, branch: string, limit?: number, connectionId?: string) => Promise<IPCResult<CommitInfo[]>>
   getLastSuccessfulCommit: (projectId: string) => Promise<IPCResult<string | null>>
   rollbackToCommit: (projectId: string, commitSha: string, branch: string) => Promise<IPCResult<string>>
 }
@@ -153,23 +159,29 @@ const api: ElectronAPI = {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
 
-  // GitLab Connections
-  saveGitLabConnection: (connection) => ipcRenderer.invoke('gitlab-connection:save', connection),
-  clearGitLabConnection: () => ipcRenderer.invoke('gitlab-connection:clear'),
-  testGitLabConnection: (apiUrl, token) => ipcRenderer.invoke('gitlab-connection:test', apiUrl, token),
+  // GitLab Connections (multi-connection support)
+  getGitLabConnections: () => ipcRenderer.invoke('gitlab-connections:list'),
+  getGitLabConnection: (id) => ipcRenderer.invoke('gitlab-connections:get', id),
+  createGitLabConnection: (connection) => ipcRenderer.invoke('gitlab-connections:create', connection),
+  updateGitLabConnection: (id, updates) => ipcRenderer.invoke('gitlab-connections:update', id, updates),
+  deleteGitLabConnection: (id) => ipcRenderer.invoke('gitlab-connections:delete', id),
+  testGitLabConnection: (apiUrl, token) => ipcRenderer.invoke('gitlab-connections:test', apiUrl, token),
 
-  // Servers
-  saveServer: (server) => ipcRenderer.invoke('server:save', server),
-  clearServer: () => ipcRenderer.invoke('server:clear'),
+  // Servers (multi-server support)
+  getServers: () => ipcRenderer.invoke('servers:list'),
+  getServer: (id) => ipcRenderer.invoke('servers:get', id),
+  createServer: (server) => ipcRenderer.invoke('servers:create', server),
+  updateServer: (id, updates) => ipcRenderer.invoke('servers:update', id, updates),
+  deleteServer: (id) => ipcRenderer.invoke('servers:delete', id),
   testSSHConnection: (host, port, username, authType, privateKey, password) =>
-    ipcRenderer.invoke('server:test-ssh', host, port, username, authType, privateKey, password),
+    ipcRenderer.invoke('servers:test-ssh', host, port, username, authType, privateKey, password),
 
   // Notifications
   showNotification: (options) => ipcRenderer.invoke('notification:show', options),
 
   // GitLab Service
-  fetchGitLabProjects: () => ipcRenderer.invoke('gitlab:fetch-projects'),
-  fetchMergeRequests: (projectId, targetBranch) => ipcRenderer.invoke('gitlab:fetch-mrs', projectId, targetBranch),
+  fetchGitLabProjects: (connectionId) => ipcRenderer.invoke('gitlab:fetch-projects', connectionId),
+  fetchMergeRequests: (projectId, targetBranch, connectionId) => ipcRenderer.invoke('gitlab:fetch-mrs', projectId, targetBranch, connectionId),
 
   // Daemon
   startDaemon: () => ipcRenderer.invoke('daemon:start'),
@@ -184,7 +196,7 @@ const api: ElectronAPI = {
   getLogStats: () => ipcRenderer.invoke('logs:stats'),
 
   // Git-based Rollback
-  getBranchCommits: (projectId, branch, limit) => ipcRenderer.invoke('gitlab:get-commits', projectId, branch, limit),
+  getBranchCommits: (projectId, branch, limit, connectionId) => ipcRenderer.invoke('gitlab:get-commits', projectId, branch, limit, connectionId),
   getLastSuccessfulCommit: (projectId) => ipcRenderer.invoke('deployments:last-successful', projectId),
   rollbackToCommit: (projectId, commitSha, branch) => ipcRenderer.invoke('deployments:rollback-to-commit', projectId, commitSha, branch),
 

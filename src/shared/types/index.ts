@@ -115,18 +115,21 @@ export const BranchSchema = z.object({
 })
 export interface Branch extends z.infer<typeof BranchSchema> {}
 
-/** GitLab 项目 - 简化配置，继承全局服务器设置 */
+/** GitLab 项目 - 支持多 GitLab、多服务器 */
 export const GitLabProjectSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1),
   gitlabId: z.number().int().positive().optional(),
   gitlabPath: z.string().min(1), // GitLab 项目路径，如 group/project
+  gitlabConnectionId: z.string().uuid(), // 关联的 GitLab 连接 ID
+  serverId: z.string().uuid(), // 关联的服务器 ID
   url: z.string().url().optional(),
   branch: z.string().min(1).default('main'), // 监听的分支
   targetBranch: z.string().min(1).default('main'), // 部署目标分支
   deployPath: z.string().min(1), // 服务器部署路径
   healthCheckUrl: z.string().url().optional().or(z.literal('')), // 健康检查 URL
   outputDir: z.string().default('dist'),
+  buildCommand: z.string().optional(), // 自定义构建命令，如 "npm run build:prod"
   packageManager: PackageManagerEnum.optional(),
   autoDeploy: z.boolean().default(false),
   isActive: z.boolean().default(true),
@@ -288,8 +291,7 @@ export const GitLabConnectionSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1),
   apiUrl: z.string().url(),
-  token: z.string().min(1),
-  pollingInterval: z.number().int().positive().default(60000) // 1分钟
+  token: z.string().min(1)
 })
 export interface GitLabConnection extends z.infer<typeof GitLabConnectionSchema> {}
 
@@ -340,10 +342,10 @@ export const MetricsConfigSchema = z.object({
 })
 export interface MetricsConfig extends z.infer<typeof MetricsConfigSchema> {}
 
-/** 应用设置 - 单实例配置模式 */
+/** 应用设置 - 多 GitLab 连接、多服务器配置模式 */
 export const AppSettingsSchema = z.object({
-  gitlabConnection: GitLabConnectionSchema.optional(),
-  server: ServerSchema.optional(),
+  gitlabConnections: z.array(GitLabConnectionSchema).default([]),
+  servers: z.array(ServerSchema).default([]),
   theme: z.enum(['light', 'dark', 'auto']).default('auto'),
   notifications: z.object({
     enabled: z.boolean().default(true),

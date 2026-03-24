@@ -17,11 +17,8 @@ export const useSettingsStore = defineStore('settings', () => {
     error.value = null
     try {
       const result = await window.electronAPI.getSettings()
-      console.log('[Settings Store] Load result:', result)
       if (result.success && result.data) {
         settings.value = result.data
-        console.log('[Settings Store] gitlabConnection:', result.data.gitlabConnection)
-        console.log('[Settings Store] server:', result.data.server)
       } else {
         error.value = result.error || 'Failed to load settings'
       }
@@ -44,26 +41,44 @@ export const useSettingsStore = defineStore('settings', () => {
     return false
   }
 
-  // GitLab Connections
-  async function saveGitLabConnection(connection: Omit<GitLabConnection, 'id'>): Promise<GitLabConnection | null> {
-    const result = await window.electronAPI.saveGitLabConnection(connection)
+  // GitLab Connections (multi-connection support)
+  async function getGitLabConnections(): Promise<GitLabConnection[]> {
+    const result = await window.electronAPI.getGitLabConnections()
+    return result.success ? (result.data || []) : []
+  }
+
+  async function getGitLabConnection(id: string): Promise<GitLabConnection | null> {
+    const result = await window.electronAPI.getGitLabConnection(id)
+    return result.success ? result.data || null : null
+  }
+
+  async function createGitLabConnection(connection: Omit<GitLabConnection, 'id'>): Promise<GitLabConnection | null> {
+    const result = await window.electronAPI.createGitLabConnection(connection)
     if (result.success && result.data) {
-      if (settings.value) {
-        settings.value.gitlabConnection = result.data
-      }
+      await loadSettings() // Refresh settings
       return result.data
     }
-    error.value = result.error || 'Failed to save connection'
+    error.value = result.error || 'Failed to create connection'
     return null
   }
 
-  async function clearGitLabConnection(): Promise<boolean> {
-    const result = await window.electronAPI.clearGitLabConnection()
-    if (result.success && settings.value) {
-      settings.value.gitlabConnection = undefined
+  async function updateGitLabConnection(id: string, updates: Partial<GitLabConnection>): Promise<GitLabConnection | null> {
+    const result = await window.electronAPI.updateGitLabConnection(id, updates)
+    if (result.success && result.data) {
+      await loadSettings() // Refresh settings
+      return result.data
+    }
+    error.value = result.error || 'Failed to update connection'
+    return null
+  }
+
+  async function deleteGitLabConnection(id: string): Promise<boolean> {
+    const result = await window.electronAPI.deleteGitLabConnection(id)
+    if (result.success) {
+      await loadSettings() // Refresh settings
       return true
     }
-    error.value = result.error || 'Failed to clear connection'
+    error.value = result.error || 'Failed to delete connection'
     return false
   }
 
@@ -72,31 +87,56 @@ export const useSettingsStore = defineStore('settings', () => {
     return result.success && result.data === true
   }
 
-  // Servers
-  async function saveServer(server: Omit<Server, 'id'>): Promise<Server | null> {
-    const result = await window.electronAPI.saveServer(server)
+  // Servers (multi-server support)
+  async function getServers(): Promise<Server[]> {
+    const result = await window.electronAPI.getServers()
+    return result.success ? (result.data || []) : []
+  }
+
+  async function getServer(id: string): Promise<Server | null> {
+    const result = await window.electronAPI.getServer(id)
+    return result.success ? result.data || null : null
+  }
+
+  async function createServer(server: Omit<Server, 'id' | 'createdAt' | 'updatedAt'>): Promise<Server | null> {
+    const result = await window.electronAPI.createServer(server)
     if (result.success && result.data) {
-      if (settings.value) {
-        settings.value.server = result.data
-      }
+      await loadSettings() // Refresh settings
       return result.data
     }
-    error.value = result.error || 'Failed to save server'
+    error.value = result.error || 'Failed to create server'
     return null
   }
 
-  async function clearServer(): Promise<boolean> {
-    const result = await window.electronAPI.clearServer()
-    if (result.success && settings.value) {
-      settings.value.server = undefined
+  async function updateServer(id: string, updates: Partial<Server>): Promise<Server | null> {
+    const result = await window.electronAPI.updateServer(id, updates)
+    if (result.success && result.data) {
+      await loadSettings() // Refresh settings
+      return result.data
+    }
+    error.value = result.error || 'Failed to update server'
+    return null
+  }
+
+  async function deleteServer(id: string): Promise<boolean> {
+    const result = await window.electronAPI.deleteServer(id)
+    if (result.success) {
+      await loadSettings() // Refresh settings
       return true
     }
-    error.value = result.error || 'Failed to clear server'
+    error.value = result.error || 'Failed to delete server'
     return false
   }
 
-  async function testSSHConnection(host: string, port: number, username: string, privateKey: string): Promise<boolean> {
-    const result = await window.electronAPI.testSSHConnection(host, port, username, privateKey)
+  async function testSSHConnection(
+    host: string,
+    port: number,
+    username: string,
+    authType: 'privateKey' | 'password',
+    privateKey?: string,
+    password?: string
+  ): Promise<boolean> {
+    const result = await window.electronAPI.testSSHConnection(host, port, username, authType, privateKey, password)
     return result.success && result.data === true
   }
 
@@ -106,10 +146,20 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   // Getters
-  const gitlabConnection = computed(() => settings.value?.gitlabConnection)
-  const server = computed(() => settings.value?.server)
+  const gitlabConnections = computed(() => settings.value?.gitlabConnections || [])
+  const servers = computed(() => settings.value?.servers || [])
   const notifications = computed(() => settings.value?.notifications)
   const daemon = computed(() => settings.value?.daemon)
+
+  // Helper: Get connection by ID
+  const getGitLabConnectionById = (id: string): GitLabConnection | undefined => {
+    return settings.value?.gitlabConnections?.find(c => c.id === id)
+  }
+
+  // Helper: Get server by ID
+  const getServerById = (id: string): Server | undefined => {
+    return settings.value?.servers?.find(s => s.id === id)
+  }
 
   return {
     settings,
@@ -117,16 +167,28 @@ export const useSettingsStore = defineStore('settings', () => {
     error,
     loadSettings,
     saveSettings,
-    saveGitLabConnection,
-    clearGitLabConnection,
+    // GitLab Connections
+    getGitLabConnections,
+    getGitLabConnection,
+    createGitLabConnection,
+    updateGitLabConnection,
+    deleteGitLabConnection,
     testGitLabConnection,
-    saveServer,
-    clearServer,
+    // Servers
+    getServers,
+    getServer,
+    createServer,
+    updateServer,
+    deleteServer,
     testSSHConnection,
+    // Event handlers
     handleSettingsUpdated,
-    gitlabConnection,
-    server,
+    // Getters
+    gitlabConnections,
+    servers,
     notifications,
-    daemon
+    daemon,
+    getGitLabConnectionById,
+    getServerById
   }
 })

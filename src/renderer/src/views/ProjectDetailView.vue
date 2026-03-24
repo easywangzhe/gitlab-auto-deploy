@@ -73,9 +73,10 @@ onMounted(async () => {
 const startDeploy = async () => {
   if (!project.value || deploying.value) return
 
-  // Check if server is configured
-  if (!settingsStore.server) {
-    ElMessage.warning('请先配置服务器（设置 → 服务器配置）')
+  // Check if server exists for this project
+  const server = settingsStore.getServerById(project.value.serverId)
+  if (!server) {
+    ElMessage.warning('项目关联的服务器不存在，请重新编辑项目')
     return
   }
 
@@ -121,9 +122,10 @@ const openRollbackDialog = async () => {
     return
   }
 
-  // 检查 GitLab 连接是否配置
-  if (!settingsStore.gitlabConnection) {
-    ElMessage.warning('请先配置 GitLab 连接（设置 → GitLab 连接）')
+  // 检查 GitLab 连接是否存在
+  const connection = settingsStore.getGitLabConnectionById(project.value.gitlabConnectionId)
+  if (!connection) {
+    ElMessage.warning('项目关联的 GitLab 连接不存在，请重新编辑项目')
     return
   }
 
@@ -135,7 +137,8 @@ const openRollbackDialog = async () => {
     commits.value = await deploymentsStore.getBranchCommits(
       project.value.gitlabId.toString(),
       project.value.branch,
-      20
+      20,
+      project.value.gitlabConnectionId
     )
     if (commits.value.length === 0) {
       ElMessage.warning('未找到提交记录')
@@ -207,15 +210,22 @@ const formatTime = (date: Date) => {
         <el-descriptions :column="2" border>
           <el-descriptions-item label="项目名称">{{ project.name }}</el-descriptions-item>
           <el-descriptions-item label="GitLab 路径">{{ project.gitlabPath }}</el-descriptions-item>
+          <el-descriptions-item label="GitLab">
+            <el-tag size="small">{{ settingsStore.getGitLabConnectionById(project.gitlabConnectionId)?.name || '未知' }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="服务器">
+            <el-tag size="small" type="info">{{ settingsStore.getServerById(project.serverId)?.name || '未知' }}</el-tag>
+          </el-descriptions-item>
           <el-descriptions-item label="监听分支">{{ project.branch }}</el-descriptions-item>
           <el-descriptions-item label="部署路径">{{ project.deployPath }}</el-descriptions-item>
           <el-descriptions-item label="输出目录">{{ project.outputDir }}</el-descriptions-item>
+          <el-descriptions-item label="构建命令">{{ project.buildCommand || '自动检测' }}</el-descriptions-item>
           <el-descriptions-item label="自动部署">
             <el-tag :type="project.autoDeploy ? 'success' : 'info'" size="small">
               {{ project.autoDeploy ? '已启用' : '未启用' }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="健康检查URL" :span="2">{{ project.healthCheckUrl || '未配置' }}</el-descriptions-item>
+          <el-descriptions-item label="健康检查URL">{{ project.healthCheckUrl || '未配置' }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ formatDate(project.createdAt) }}</el-descriptions-item>
           <el-descriptions-item label="更新时间">{{ formatDate(project.updatedAt) }}</el-descriptions-item>
         </el-descriptions>

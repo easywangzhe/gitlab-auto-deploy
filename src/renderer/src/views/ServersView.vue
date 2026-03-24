@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, toRaw, watch } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useSettingsStore } from '../stores/settings'
+import type { Server } from '../../../shared/types'
 
-const settingsStore = useSettingsStore()
-
+const servers = ref<Server[]>([])
 const loading = ref(false)
+const dialogVisible = ref(false)
 const testing = ref(false)
-const hasPassword = ref(false)
+const editingId = ref<string | null>(null)
 
 const serverForm = ref({
   name: '',
@@ -18,43 +18,51 @@ const serverForm = ref({
   password: ''
 })
 
-const hasServer = computed(() => !!settingsStore.server)
-
-// Watch for settings changes to update form
-watch(() => settingsStore.server, (server) => {
-  if (server) {
-    serverForm.value = {
-      name: server.name,
-      host: server.host,
-      port: server.port,
-      username: server.username,
-      authType: server.authType || 'privateKey',
-      password: '' // Password not returned for security
-    }
-    hasPassword.value = server.authType === 'password' && !!server.password
-  }
-}, { immediate: true })
+const dialogTitle = computed(() => editingId.value ? '编辑服务器' : '添加服务器')
 
 onMounted(async () => {
+  await loadServers()
+})
+
+const loadServers = async () => {
   loading.value = true
   try {
-    await settingsStore.loadSettings()
-    // Load existing server into form
-    if (settingsStore.server) {
-      serverForm.value = {
-        name: settingsStore.server.name,
-        host: settingsStore.server.host,
-        port: settingsStore.server.port,
-        username: settingsStore.server.username,
-        authType: settingsStore.server.authType || 'privateKey',
-        password: '' // Password not returned for security
-      }
-      hasPassword.value = settingsStore.server.authType === 'password' && !!settingsStore.server.password
+    const result = await window.electronAPI?.getServers()
+    if (result?.success) {
+      servers.value = result.data || []
     }
+  } catch (error) {
+    ElMessage.error('加载服务器列表失败')
   } finally {
     loading.value = false
   }
-})
+}
+
+const openAddDialog = () => {
+  editingId.value = null
+  serverForm.value = {
+    name: '',
+    host: '',
+    port: 22,
+    username: '',
+    authType: 'privateKey',
+    password: ''
+  }
+  dialogVisible.value = true
+}
+
+const openEditDialog = (server: Server) => {
+  editingId.value = server.id
+  serverForm.value = {
+    name: server.name,
+    host: server.host,
+    port: server.port,
+    username: server.username,
+    authType: server.authType || 'privateKey',
+    password: '' // Password not returned for security
+  }
+  dialogVisible.value = true
+}
 
 const testConnection = async () => {
   if (!serverForm.value.host || !serverForm.value.username) {
@@ -85,38 +93,78 @@ const testConnection = async () => {
 }
 
 const saveServer = async () => {
+  if (!serverForm.value.name) {
+    ElMessage.warning('请填写服务器名称')
+    return
+  }
+  if (!serverForm.value.host) {
+    ElMessage.warning('请填写主机地址')
+    return
+  }
+  if (!serverForm.value.username) {
+    ElMessage.warning('请填写用户名')
+    return
+  }
+  if (!editingId.value && serverForm.value.authType === 'password' && !serverForm.value.password) {
+    ElMessage.warning('请填写密码')
+    return
+  }
+
   try {
-    const formData = toRaw(serverForm.value)
-    // If password is empty and we had a password before, keep the existing one
-    if (formData.authType === 'password' && !formData.password && hasPassword.value && settingsStore.server?.password) {
-      formData.password = settingsStore.server.password
+    let result
+    if (editingId.value) {
+      // Update existing server
+      const updates: Partial<Server> = {
+        name: serverForm.value.name,
+        host: serverForm.value.host,
+        port: serverForm.value.port,
+        username: serverForm.value.username,
+        authType: serverForm.value.authType
+      }
+      // Only include password if provided
+      if (serverForm.value.authType === 'password' && serverForm.value.password) {
+        updates.password = serverForm.value.password
+      }
+      result = await window.electronAPI?.updateServer(editingId.value, updates)
+    } else {
+      // Create new server
+      result = await window.electronAPI?.createServer({
+        name: serverForm.value.name,
+        host: serverForm.value.host,
+        port: serverForm.value.port,
+        username: serverForm.value.username,
+        authType: serverForm.value.authType,
+        password: serverForm.value.authType === 'password' ? serverForm.value.password : undefined
+      })
     }
-    await settingsStore.saveServer(formData)
-    if (formData.authType === 'password') {
-      hasPassword.value = true
+
+    if (result?.success) {
+      ElMessage.success(editingId.value ? '服务器已更新' : '服务器已添加')
+      dialogVisible.value = false
+      await loadServers()
+    } else {
+      ElMessage.error('保存失败: ' + (result?.error || '未知错误'))
     }
-    ElMessage.success(hasServer.value ? '服务器已更新' : '服务器已保存')
   } catch (error) {
     ElMessage.error('保存失败: ' + (error instanceof Error ? error.message : '未知错误'))
   }
 }
 
-const clearServer = async () => {
+const deleteServer = async (server: Server) => {
   try {
-    await ElMessageBox.confirm('确定要清除服务器配置吗？', '确认清除', {
-      type: 'warning'
-    })
-    await settingsStore.clearServer()
-    serverForm.value = {
-      name: '',
-      host: '',
-      port: 22,
-      username: '',
-      authType: 'privateKey',
-      password: ''
+    await ElMessageBox.confirm(
+      `确定要删除服务器 "${server.name}" 吗？删除后无法恢复。`,
+      '确认删除',
+      { type: 'warning' }
+    )
+
+    const result = await window.electronAPI?.deleteServer(server.id)
+    if (result?.success) {
+      ElMessage.success('服务器已删除')
+      await loadServers()
+    } else {
+      ElMessage.error('删除失败: ' + (result?.error || '未知错误'))
     }
-    hasPassword.value = false
-    ElMessage.success('服务器配置已清除')
   } catch {
     // User cancelled
   }
@@ -128,11 +176,42 @@ const clearServer = async () => {
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>服务器配置</span>
+          <span>服务器管理</span>
+          <el-button type="primary" @click="openAddDialog">
+            <el-icon><Plus /></el-icon>
+            添加服务器
+          </el-button>
         </div>
       </template>
 
-      <el-form :model="serverForm" label-width="120px" class="server-form">
+      <el-empty v-if="servers.length === 0" description="暂无服务器配置，请添加">
+        <el-button type="primary" @click="openAddDialog">添加服务器</el-button>
+      </el-empty>
+
+      <el-table v-else :data="servers" stripe>
+        <el-table-column prop="name" label="服务器名称" min-width="150" />
+        <el-table-column prop="host" label="主机地址" min-width="180" />
+        <el-table-column prop="port" label="SSH 端口" width="100" />
+        <el-table-column prop="username" label="用户名" width="120" />
+        <el-table-column label="认证方式" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.authType === 'privateKey' ? 'primary' : 'warning'" size="small">
+              {{ row.authType === 'privateKey' ? '私钥' : '密码' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" link type="primary" @click="openEditDialog(row)">编辑</el-button>
+            <el-button size="small" link type="danger" @click="deleteServer(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <!-- Add/Edit Dialog -->
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="500px">
+      <el-form :model="serverForm" label-width="100px">
         <el-form-item label="服务器名称" required>
           <el-input v-model="serverForm.name" placeholder="例如: 生产服务器" />
         </el-form-item>
@@ -151,16 +230,22 @@ const clearServer = async () => {
             <el-radio value="password">密码认证</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="serverForm.authType === 'password'" label="密码" required>
-          <el-input v-model="serverForm.password" type="password" :placeholder="hasPassword ? '已保存 (留空保持不变)' : 'SSH 密码'" show-password />
-        </el-form-item>
-        <el-form-item>
-          <el-button @click="testConnection" :loading="testing">测试连接</el-button>
-          <el-button type="primary" @click="saveServer">保存配置</el-button>
-          <el-button v-if="hasServer" type="danger" @click="clearServer">清除配置</el-button>
+        <el-form-item v-if="serverForm.authType === 'password'" label="密码" :required="!editingId">
+          <el-input
+            v-model="serverForm.password"
+            type="password"
+            show-password
+            :placeholder="editingId ? '留空保持不变' : 'SSH 密码'"
+          />
         </el-form-item>
       </el-form>
-    </el-card>
+
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="testConnection" :loading="testing">测试连接</el-button>
+        <el-button type="primary" @click="saveServer">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -170,10 +255,6 @@ const clearServer = async () => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-  }
-
-  .server-form {
-    max-width: 600px;
   }
 }
 </style>
