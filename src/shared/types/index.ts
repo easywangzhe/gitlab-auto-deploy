@@ -354,7 +354,10 @@ export const AppSettingsSchema = z.object({
   }),
   daemon: z.object({
     enabled: z.boolean().default(false),
-    pollingInterval: z.number().int().positive().default(60000)
+    pollingInterval: z.number().int().positive().default(60000),
+    scheduleEnabled: z.boolean().default(false),
+    startTime: z.string().default('09:00'),      // 开始时间 HH:mm
+    endTime: z.string().default('18:00')         // 结束时间 HH:mm
   })
 })
 export interface AppSettings extends z.infer<typeof AppSettingsSchema> {}

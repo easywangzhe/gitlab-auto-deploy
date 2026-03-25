@@ -36,6 +36,7 @@ interface LastCheckTimesCache {
 
 class DaemonService {
   private pollingInterval: NodeJS.Timeout | null = null
+  private scheduleInterval: NodeJS.Timeout | null = null
   private monitoredProjects: Map<string, MonitoredProject> = new Map()
   private state: DaemonState = {
     status: 'stopped',
@@ -45,6 +46,7 @@ class DaemonService {
     deploymentsTriggered: 0
   }
   private onStatusChange?: (status: DaemonState) => void
+  private isScheduleActive: boolean = false  // 当前是否在调度时间段内
 
   /**
    * Get the path to the last check times cache file
@@ -170,6 +172,11 @@ class DaemonService {
       const pollingIntervalMs = settings.daemon.pollingInterval || 60000
       this.startPolling(pollingIntervalMs)
 
+      // Start schedule checker if schedule is enabled
+      if (settings.daemon.scheduleEnabled) {
+        this.startScheduleChecker(settings.daemon.startTime, settings.daemon.endTime)
+      }
+
       this.updateStatus('running', null, this.monitoredProjects.size)
       logService.info('daemon', `Daemon started successfully, monitoring ${this.monitoredProjects.size} project(s)`)
 
@@ -197,6 +204,12 @@ class DaemonService {
       if (this.pollingInterval) {
         clearInterval(this.pollingInterval)
         this.pollingInterval = null
+      }
+
+      // Stop schedule checker
+      if (this.scheduleInterval) {
+        clearInterval(this.scheduleInterval)
+        this.scheduleInterval = null
       }
 
       // Stop the deployment queue
@@ -566,6 +579,112 @@ class DaemonService {
       const notification = new Notification({ title, body })
       notification.show()
     }
+  }
+
+  /**
+   * Check if current time is within the scheduled time range
+   */
+  private isInScheduleWindow(startTime: string, endTime: string): boolean {
+    const now = new Date()
+    const currentMinutes = now.getHours() * 60 + now.getMinutes()
+
+    const [startHour, startMin] = startTime.split(':').map(Number)
+    const [endHour, endMin] = endTime.split(':').map(Number)
+
+    const startMinutes = startHour * 60 + startMin
+    const endMinutes = endHour * 60 + endMin
+
+    // Handle overnight schedule (e.g., 22:00 - 06:00)
+    if (startMinutes > endMinutes) {
+      return currentMinutes >= startMinutes || currentMinutes < endMinutes
+    }
+
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes
+  }
+
+  /**
+   * Start the schedule checker that auto starts/stops daemon based on time
+   */
+  startScheduleChecker(startTime: string, endTime: string): void {
+    if (this.scheduleInterval) {
+      clearInterval(this.scheduleInterval)
+    }
+
+    this.isScheduleActive = this.isInScheduleWindow(startTime, endTime)
+    logService.info('daemon', `Schedule checker started, initial state: ${this.isScheduleActive ? 'in schedule' : 'out of schedule'}`)
+
+    // Handle initial state
+    if (this.isScheduleActive) {
+      // In schedule window - ensure polling is active
+      if (this.state.status === 'running' && !this.pollingInterval) {
+        const settings = getSettings()
+        this.startPolling(settings?.daemon?.pollingInterval || 60000)
+        logService.info('daemon', 'Schedule: currently in time window, polling started')
+      }
+    } else {
+      // Not in schedule window - pause polling immediately
+      if (this.pollingInterval) {
+        clearInterval(this.pollingInterval)
+        this.pollingInterval = null
+        logService.info('daemon', 'Schedule: currently out of time window, polling paused')
+        this.sendNotification('守护进程', '当前不在工作时间段，暂停监控')
+      }
+    }
+
+    // Check every minute
+    this.scheduleInterval = setInterval(() => {
+      const settings = getSettings()
+      if (!settings?.daemon?.scheduleEnabled) {
+        return
+      }
+
+      const shouldBeActive = this.isInScheduleWindow(
+        settings.daemon.startTime || '09:00',
+        settings.daemon.endTime || '18:00'
+      )
+
+      // State transition
+      if (shouldBeActive && !this.isScheduleActive) {
+        // Entering schedule window - ensure polling is active
+        this.isScheduleActive = true
+        if (this.state.status === 'running' && !this.pollingInterval) {
+          this.startPolling(settings.daemon.pollingInterval || 60000)
+          logService.info('daemon', 'Schedule: entered time window, polling resumed')
+          this.sendNotification('守护进程', '进入工作时间段，开始监控')
+        }
+      } else if (!shouldBeActive && this.isScheduleActive) {
+        // Leaving schedule window - pause polling
+        this.isScheduleActive = false
+        if (this.pollingInterval) {
+          clearInterval(this.pollingInterval)
+          this.pollingInterval = null
+          logService.info('daemon', 'Schedule: left time window, polling paused')
+          this.sendNotification('守护进程', '已过工作时间段，暂停监控')
+        }
+      }
+    }, 60000) // Check every minute
+  }
+
+  /**
+   * Update schedule settings (called when settings change)
+   */
+  updateScheduleSettings(enabled: boolean, startTime: string, endTime: string): void {
+    if (enabled) {
+      this.startScheduleChecker(startTime, endTime)
+    } else {
+      if (this.scheduleInterval) {
+        clearInterval(this.scheduleInterval)
+        this.scheduleInterval = null
+      }
+      this.isScheduleActive = false
+    }
+  }
+
+  /**
+   * Get current schedule state
+   */
+  getScheduleState(): { isActive: boolean } {
+    return { isActive: this.isScheduleActive }
   }
 
   /**

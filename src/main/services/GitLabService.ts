@@ -33,7 +33,10 @@ export class GitLabService {
 
     this.api = new Gitlab({
       host: apiUrl,
-      token: config.token
+      token: config.token,
+      requestOptions: {
+        timeout: 30000  // 30 seconds timeout
+      }
     })
 
     logger.info('gitlab', `Connected to GitLab at ${config.apiUrl}`)

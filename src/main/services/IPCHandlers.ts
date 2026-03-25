@@ -469,8 +469,23 @@ export async function registerIPCHandlers(): Promise<void> {
   ipcMain.handle('settings:save', async (_event, newSettings: AppSettings) => {
     try {
       AppSettingsSchema.parse(newSettings)
+
+      // Check if daemon schedule settings changed
+      const oldScheduleEnabled = settings?.daemon?.scheduleEnabled
+      const oldStartTime = settings?.daemon?.startTime
+      const oldEndTime = settings?.daemon?.endTime
+
       settings = newSettings
       await saveSettingsData()
+
+      // Update daemon schedule if settings changed and daemon is running
+      if (newSettings.daemon?.scheduleEnabled !== undefined) {
+        daemonService.updateScheduleSettings(
+          newSettings.daemon.scheduleEnabled,
+          newSettings.daemon.startTime || '09:00',
+          newSettings.daemon.endTime || '18:00'
+        )
+      }
 
       sendToAll('settings:updated', settings)
 

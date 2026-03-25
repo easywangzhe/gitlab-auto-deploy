@@ -14,6 +14,9 @@ const settings = computed(() => settingsStore.settings)
 
 const daemonEnabled = ref(false)
 const pollingInterval = ref(60000)
+const scheduleEnabled = ref(false)
+const startTime = ref('09:00')
+const endTime = ref('18:00')
 const theme = ref<'light' | 'dark' | 'auto'>('auto')
 const notifyOnSuccess = ref(true)
 const notifyOnFailure = ref(true)
@@ -51,6 +54,9 @@ onMounted(async () => {
     if (settings.value?.daemon) {
       daemonEnabled.value = settings.value.daemon.enabled
       pollingInterval.value = settings.value.daemon.pollingInterval || 60000
+      scheduleEnabled.value = settings.value.daemon.scheduleEnabled || false
+      startTime.value = settings.value.daemon.startTime || '09:00'
+      endTime.value = settings.value.daemon.endTime || '18:00'
     }
     if (settings.value?.notifications) {
       notifyOnSuccess.value = settings.value.notifications.notifyOnSuccess ?? true
@@ -78,7 +84,10 @@ const autoSaveSettings = async (startStopDaemon = false) => {
       theme: theme.value,
       daemon: {
         enabled: daemonEnabled.value,
-        pollingInterval: pollingInterval.value
+        pollingInterval: pollingInterval.value,
+        scheduleEnabled: scheduleEnabled.value,
+        startTime: startTime.value,
+        endTime: endTime.value
       },
       notifications: {
         enabled: true,
@@ -125,7 +134,7 @@ const onDaemonEnabledChange = async (enabled: boolean) => {
 }
 
 // 监听其他设置变化，自动保存
-watch([theme, pollingInterval, notifyOnSuccess, notifyOnFailure], () => {
+watch([theme, pollingInterval, notifyOnSuccess, notifyOnFailure, scheduleEnabled, startTime, endTime], () => {
   autoSaveSettings()
 })
 
@@ -185,6 +194,36 @@ const navigateTo = (path: string) => {
               <div class="form-tip">启用后将自动监听 GitLab 项目的 MR 合并事件并触发自动部署</div>
             </el-form-item>
 
+            <el-form-item label="定时开启">
+              <el-switch v-model="scheduleEnabled" :disabled="!daemonEnabled" />
+              <div class="form-tip">开启后只在指定时间段内运行守护进程</div>
+            </el-form-item>
+
+            <el-form-item label="工作时间段" v-if="scheduleEnabled">
+              <div class="time-range">
+                <el-time-select
+                  v-model="startTime"
+                  :max-time="endTime"
+                  placeholder="开始时间"
+                  start="00:00"
+                  step="00:30"
+                  end="23:30"
+                  style="width: 120px"
+                />
+                <span class="time-separator">至</span>
+                <el-time-select
+                  v-model="endTime"
+                  :min-time="startTime"
+                  placeholder="结束时间"
+                  start="00:00"
+                  step="00:30"
+                  end="23:30"
+                  style="width: 120px"
+                />
+              </div>
+              <div class="form-tip">守护进程将在此时间段内自动监控，超时自动暂停</div>
+            </el-form-item>
+
             <el-form-item label="轮询间隔">
               <el-select v-model="pollingInterval" :disabled="!daemonEnabled">
                 <el-option label="30 秒" :value="30000" />
@@ -223,6 +262,16 @@ const navigateTo = (path: string) => {
     font-size: 12px;
     color: #909399;
     margin-top: 5px;
+  }
+
+  .time-range {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .time-separator {
+    color: #606266;
   }
 }
 </style>
