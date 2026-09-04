@@ -70,6 +70,18 @@ const testConnection = async () => {
     return
   }
 
+  // 编辑已有服务器时，若未重新输入密码，回填已保存密码用于测试
+  let testPassword = serverForm.value.authType === 'password' ? serverForm.value.password : undefined
+  if (serverForm.value.authType === 'password' && !testPassword && editingId.value) {
+    const saved = servers.value.find(s => s.id === editingId.value)
+    testPassword = saved?.password
+  }
+
+  if (serverForm.value.authType === 'password' && !testPassword) {
+    ElMessage.warning('密码认证方式下请填写密码')
+    return
+  }
+
   testing.value = true
   try {
     const result = await window.electronAPI?.testSSHConnection(
@@ -77,8 +89,8 @@ const testConnection = async () => {
       serverForm.value.port,
       serverForm.value.username,
       serverForm.value.authType,
-      serverForm.value.authType === 'privateKey' ? '' : undefined,
-      serverForm.value.authType === 'password' ? serverForm.value.password : undefined
+      undefined,
+      testPassword
     )
     if (result?.success && result.data) {
       ElMessage.success('SSH 连接测试成功')

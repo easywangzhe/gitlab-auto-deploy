@@ -56,8 +56,20 @@ const openEditDialog = (connection: GitLabConnection) => {
 }
 
 const testConnection = async () => {
-  if (!connectionForm.value.apiUrl || !connectionForm.value.token) {
-    ElMessage.warning('请填写 API URL 和 Token')
+  if (!connectionForm.value.apiUrl) {
+    ElMessage.warning('请填写 API URL')
+    return
+  }
+
+  // 编辑已有连接时，若未重新输入 Token，回填已保存 Token 用于测试
+  let testToken = connectionForm.value.token
+  if (!testToken && editingId.value) {
+    const saved = connections.value.find(c => c.id === editingId.value)
+    testToken = saved?.token || ''
+  }
+
+  if (!testToken) {
+    ElMessage.warning('请填写 Access Token')
     return
   }
 
@@ -65,7 +77,7 @@ const testConnection = async () => {
   try {
     const result = await window.electronAPI?.testGitLabConnection(
       connectionForm.value.apiUrl,
-      connectionForm.value.token
+      testToken
     )
     if (result?.success && result.data) {
       ElMessage.success('连接测试成功')

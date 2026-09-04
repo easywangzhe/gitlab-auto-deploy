@@ -23,7 +23,7 @@ import {
 } from '../../shared/types'
 import { gitLabService } from './GitLabService'
 import { deployService } from './DeployService'
-import { credentialService } from './CredentialService'
+import { credentialService } from './SecretStoreService'
 import { deploymentQueue } from './DeploymentQueue'
 import { daemonService } from './DaemonService'
 import { webhookService, WebhookConfig } from './WebhookService'
