@@ -13,7 +13,7 @@ import {
 } from '../../shared/types'
 import { deployService } from './DeployService'
 import { buildService } from './BuildService'
-import { credentialService } from './CredentialService'
+import { credentialService } from './SecretStoreService'
 import { getSettings, getProject } from './IPCHandlers'
 import { webhookService } from './WebhookService'
 import { prometheusMetrics } from './PrometheusMetricsService'
@@ -41,6 +41,7 @@ interface ProjectQueue {
 export class DeploymentQueue {
   private projectQueues: Map<string, ProjectQueue> = new Map()
   private activeDeployments: Map<string, QueueItem> = new Map()
+  private cancelledDeployments: Set<string> = new Set()
   private maxParallelProjects: number = 3
   private processingInterval: NodeJS.Timeout | null = null
   private onDeploymentUpdate?: (deployment: Deployment) => void
@@ -121,11 +122,23 @@ export class DeploymentQueue {
     // Check if it's active
     const activeItem = this.activeDeployments.get(deploymentId)
     if (activeItem) {
+      // 标记为已取消，并让对应项目队列停止处理，避免 isProcessing 残留导致后续部署永久排队
+      this.cancelledDeployments.add(deploymentId)
+      const projectQueue = this.projectQueues.get(activeItem.projectId)
+      if (projectQueue) {
+        const idx = projectQueue.items.findIndex(i => i.deploymentId === deploymentId)
+        if (idx >= 0) {
+          projectQueue.items.splice(idx, 1)
+        }
+        projectQueue.isProcessing = false
+      }
+      this.activeDeployments.delete(deploymentId)
       deployService.updateDeploymentStatus(
         deploymentId,
         DeploymentStatusEnum.enum.cancelled
       )
-      this.activeDeployments.delete(deploymentId)
+      await this.saveQueueState()
+      this.processQueue()
       logger.info('queue', `Cancelled active deployment ${deploymentId}`)
       return true
     }
@@ -144,6 +157,8 @@ export class DeploymentQueue {
         })
         // Save queue state for persistence
         await this.saveQueueState()
+        // 空出的位置立即尝试推进队列
+        this.processQueue()
         return true
       }
     }
@@ -292,6 +307,12 @@ export class DeploymentQueue {
     // Run deployment asynchronously
     this.executeDeployment(item)
       .then(() => {
+        // 若部署已被取消，取消逻辑已清理队列，这里不再重复推进
+        if (this.cancelledDeployments.has(item.deploymentId)) {
+          this.cancelledDeployments.delete(item.deploymentId)
+          return
+        }
+
         // Remove from queue after completion
         queue.items.shift()
         queue.isProcessing = false
@@ -310,6 +331,12 @@ export class DeploymentQueue {
         this.processQueue()
       })
       .catch(error => {
+        // 若部署已被取消，取消逻辑已清理队列，这里不再重复推进
+        if (this.cancelledDeployments.has(item.deploymentId)) {
+          this.cancelledDeployments.delete(item.deploymentId)
+          return
+        }
+
         logger.error('queue', `Deployment ${item.deploymentId} failed`, {
           error,
           projectId
@@ -802,21 +829,27 @@ export class DeploymentQueue {
 
       // Restore project queues
       for (const queueData of state.projectQueues) {
-        const items: QueueItem[] = queueData.items.map((item: {
-          deploymentId: string
-          projectId: string
-          mergeRequest: MergeRequest
-          project: GitLabProject
-          priority: number
-          addedAt: string
-        }) => ({
-          deploymentId: item.deploymentId,
-          projectId: item.projectId,
-          mergeRequest: item.mergeRequest,
-          project: item.project,
-          priority: item.priority,
-          addedAt: new Date(item.addedAt)
-        }))
+        const items: QueueItem[] = queueData.items
+          .map((item: {
+            deploymentId: string
+            projectId: string
+            mergeRequest: MergeRequest
+            project: GitLabProject
+            priority: number
+            addedAt: string
+          }) => ({
+            deploymentId: item.deploymentId,
+            projectId: item.projectId,
+            mergeRequest: item.mergeRequest,
+            project: item.project,
+            priority: item.priority,
+            addedAt: new Date(item.addedAt)
+          }))
+          // 过滤已取消/已删除的部署，避免重启后重新执行
+          .filter(item => {
+            const deployment = deployService.getDeployment(item.deploymentId)
+            return !!deployment && deployment.status === 'pending'
+          })
 
         this.projectQueues.set(queueData.projectId, {
           projectId: queueData.projectId,

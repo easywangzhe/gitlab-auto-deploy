@@ -194,12 +194,21 @@ export class CredentialService {
 
   async testGitLabConnection(apiUrl: string, token: string): Promise<boolean> {
     try {
-      const response = await fetch(`${apiUrl}/api/v4/user`, {
+      // 归一化尾斜杠，避免 URL 拼接出双斜杠等异常路径
+      const baseUrl = apiUrl.trim().replace(/\/+$/, '')
+      const response = await fetch(`${baseUrl}/api/v4/user`, {
         headers: {
           'Private-Token': token
         }
       })
 
+      if (!response.ok) {
+        // 之前仅在 fetch 抛异常时才会记录日志，导致非 2xx（如 401）静默失败难以排查
+        logger.error('credentials', 'GitLab connection test rejected', {
+          status: response.status,
+          apiUrl: baseUrl
+        })
+      }
       return response.ok
     } catch (error) {
       logger.error('credentials', 'GitLab connection test failed', { error, apiUrl })
