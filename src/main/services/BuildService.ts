@@ -18,13 +18,87 @@ import { logger } from '../utils/logger'
 
 export class BuildService {
   private workspacePath: string
+  private activeProcesses = new Map<string, Set<ReturnType<typeof execa>>>()
 
   constructor() {
     this.workspacePath = path.join(app.getPath('userData'), 'workspace')
   }
 
+  /**
+   * 以 detached 模式启动子进程（成为进程组 leader），并纳入 projectId 的活跃进程跟踪，
+   * 以便取消部署时能通过进程组信号一次性终止整棵进程树（shell -> pnpm -> node -> vue-tsc/vite）。
+   */
+  private runTracked(
+    projectId: string,
+    file: string,
+    args: string[],
+    opts: Parameters<typeof execa>[2] = {}
+  ): ReturnType<typeof execa> {
+    const child = execa(file, args, { ...opts, detached: true })
+
+    let set = this.activeProcesses.get(projectId)
+    if (!set) {
+      set = new Set()
+      this.activeProcesses.set(projectId, set)
+    }
+    set.add(child)
+
+    child.on('exit', () => {
+      set!.delete(child)
+      if (set!.size === 0) {
+        this.activeProcesses.delete(projectId)
+      }
+    })
+
+    return child
+  }
+
+  /**
+   * 终止某个项目的所有活跃子进程（构建/安装等）。
+   * macOS/Linux 用进程组信号杀死整棵树；Windows 用 taskkill /T /F。
+   */
+  cancelProject(projectId: string): void {
+    const set = this.activeProcesses.get(projectId)
+    if (!set || set.size === 0) {
+      return
+    }
+
+    logger.info('build', `Cancelling active build processes for project ${projectId}`, {
+      processCount: set.size
+    })
+
+    for (const child of Array.from(set)) {
+      try {
+        if (!child.pid) continue
+        if (process.platform === 'win32') {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { execSync } = require('child_process') as typeof import('child_process')
+          execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' })
+        } else {
+          // 负 pid 表示向整个进程组发送信号，覆盖 shell 及其所有孙进程
+          process.kill(-child.pid, 'SIGTERM')
+        }
+      } catch (error) {
+        logger.warn('build', `Failed to kill build process for project ${projectId}`, {
+          error: error instanceof Error ? error.message : 'Unknown error'
+        })
+      }
+    }
+
+    this.activeProcesses.delete(projectId)
+  }
+
   private getProjectPath(projectId: string): string {
     return path.join(this.workspacePath, projectId)
+  }
+
+  /**
+   * 从项目工作目录反推 projectId（workspace 下最后一层目录名）。
+   * 用于 install/build 时将子进程归属到对应 projectId，便于取消时定位。
+   */
+  private getProjectIdFromPath(projectPath: string): string {
+    const rel = path.relative(this.workspacePath, projectPath)
+    return rel.split(path.sep)[0] || path.basename(projectPath)
   }
 
   private async ensureDirectory(dir: string): Promise<void> {
@@ -256,7 +330,7 @@ export class BuildService {
 
     const command = commands[packageManager]
 
-    await execa(shell, ['-l', '-c', command], {
+    await this.runTracked(this.getProjectIdFromPath(projectPath), shell, ['-l', '-c', command], {
       cwd: projectPath,
       timeout: 300000, // 5 minutes timeout for install
       env: {
@@ -318,15 +392,20 @@ export class BuildService {
       // 如果有自定义构建命令，直接使用；否则使用自动检测的命令
       const buildCommand = customBuildCommand || `npm run ${command}`
 
-      const result = await execa(shell, ['-l', '-c', buildCommand], {
-        cwd: projectPath,
-        timeout,
-        all: true,
-        env: {
-          ...process.env,
-          PATH: this.getEnvPath()
+      const result = await this.runTracked(
+        this.getProjectIdFromPath(projectPath),
+        shell,
+        ['-l', '-c', buildCommand],
+        {
+          cwd: projectPath,
+          timeout,
+          all: true,
+          env: {
+            ...process.env,
+            PATH: this.getEnvPath()
+          }
         }
-      })
+      )
 
       // Wait a moment for file system to sync (especially for background processes in build scripts)
       await new Promise(resolve => setTimeout(resolve, 1000))

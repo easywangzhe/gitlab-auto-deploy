@@ -122,6 +122,9 @@ export class DeploymentQueue {
     // Check if it's active
     const activeItem = this.activeDeployments.get(deploymentId)
     if (activeItem) {
+      // 终止该项目的构建/安装子进程树，避免取消后旧进程残留污染工作目录
+      buildService.cancelProject(activeItem.projectId)
+
       // 标记为已取消，并让对应项目队列停止处理，避免 isProcessing 残留导致后续部署永久排队
       this.cancelledDeployments.add(deploymentId)
       const projectQueue = this.projectQueues.get(activeItem.projectId)
@@ -666,6 +669,13 @@ export class DeploymentQueue {
       this.onDeploymentUpdate?.(deployService.getDeployment(deploymentId)!)
 
     } catch (error) {
+      // 被取消的部署：其构建进程已被 SIGTERM 终止，会走到这里；
+      // 此时不应把状态从 cancelled 覆盖回 failed，也不应误发失败通知
+      if (this.cancelledDeployments.has(deploymentId)) {
+        this.onDeploymentUpdate?.(deployService.getDeployment(deploymentId)!)
+        throw error
+      }
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       deployService.completeDeployment(deploymentId, false, errorMessage)
       deployService.addDeploymentLog(deploymentId, 'error', errorMessage)
