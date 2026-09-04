@@ -65,19 +65,30 @@ const openEditDialog = (server: Server) => {
 }
 
 const testConnection = async () => {
+  // 编辑已有服务器且未改动密码：直接按 id 在主进程侧测试（无需明文密码）
+  if (editingId.value && !serverForm.value.password && serverForm.value.authType === 'password') {
+    testing.value = true
+    try {
+      const result = await window.electronAPI?.testSSHConnectionById(editingId.value)
+      if (result?.success && result.data) {
+        ElMessage.success('SSH 连接测试成功')
+      } else {
+        ElMessage.error('SSH 连接测试失败: ' + (result?.error || '未知错误'))
+      }
+    } catch {
+      ElMessage.error('SSH 连接测试失败')
+    } finally {
+      testing.value = false
+    }
+    return
+  }
+
   if (!serverForm.value.host || !serverForm.value.username) {
     ElMessage.warning('请填写主机地址和用户名')
     return
   }
 
-  // 编辑已有服务器时，若未重新输入密码，回填已保存密码用于测试
-  let testPassword = serverForm.value.authType === 'password' ? serverForm.value.password : undefined
-  if (serverForm.value.authType === 'password' && !testPassword && editingId.value) {
-    const saved = servers.value.find(s => s.id === editingId.value)
-    testPassword = saved?.password
-  }
-
-  if (serverForm.value.authType === 'password' && !testPassword) {
+  if (serverForm.value.authType === 'password' && !serverForm.value.password) {
     ElMessage.warning('密码认证方式下请填写密码')
     return
   }
@@ -90,7 +101,7 @@ const testConnection = async () => {
       serverForm.value.username,
       serverForm.value.authType,
       undefined,
-      testPassword
+      serverForm.value.authType === 'password' ? serverForm.value.password : undefined
     )
     if (result?.success && result.data) {
       ElMessage.success('SSH 连接测试成功')

@@ -56,15 +56,6 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     return result.success
   }
 
-  // Rollback a deployment
-  async function rollbackDeployment(deploymentId: string): Promise<boolean> {
-    const result = await window.electronAPI.rollbackDeployment(deploymentId)
-    if (!result.success) {
-      error.value = result.error || 'Failed to rollback deployment'
-    }
-    return result.success
-  }
-
   // Get deployment logs
   async function getDeploymentLogs(deploymentId: string): Promise<string[]> {
     const result = await window.electronAPI.getDeploymentLogs(deploymentId)
@@ -165,7 +156,6 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     loadDeployments,
     startDeployment,
     cancelDeployment,
-    rollbackDeployment,
     getDeploymentLogs,
     deleteDeployment,
     handleDeploymentStarted,

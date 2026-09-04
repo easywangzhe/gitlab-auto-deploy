@@ -45,6 +45,7 @@ export class DeploymentQueue {
   private maxParallelProjects: number = 3
   private processingInterval: NodeJS.Timeout | null = null
   private onDeploymentUpdate?: (deployment: Deployment) => void
+  private onDeploymentStarted?: (deployment: Deployment) => void
 
   constructor(maxParallel: number = 3) {
     this.maxParallelProjects = maxParallel
@@ -56,6 +57,10 @@ export class DeploymentQueue {
 
   setUpdateCallback(callback: (deployment: Deployment) => void): void {
     this.onDeploymentUpdate = callback
+  }
+
+  setStartedCallback(callback: (deployment: Deployment) => void): void {
+    this.onDeploymentStarted = callback
   }
 
   /**
@@ -111,6 +116,9 @@ export class DeploymentQueue {
 
     // Trigger processing
     this.processQueue()
+
+    // 广播新部署入队，供渲染进程自动刷新部署列表（手动/守护进程/回滚路径统一）
+    this.onDeploymentStarted?.(deployment)
 
     return deployment.id
   }
@@ -473,7 +481,7 @@ export class DeploymentQueue {
 
       // 使用自定义构建命令或自动检测的命令
       const finalBuildCommand = project.buildCommand || buildCommand
-      const displayCommand = project.buildCommand ? project.buildCommand : `npm run ${buildCommand}`
+      const displayCommand = project.buildCommand ? project.buildCommand : `${packageManager} run ${buildCommand}`
 
       deployService.addDeploymentLog(deploymentId, 'info', `Running build: ${displayCommand}`)
       logService.info('build', `Running build: ${displayCommand}`, {
@@ -481,7 +489,7 @@ export class DeploymentQueue {
         command: displayCommand,
         customCommand: !!project.buildCommand
       })
-      const buildJob = await buildService.build(projectPath, buildCommand, 600000, project.buildCommand)
+      const buildJob = await buildService.build(projectPath, buildCommand, 600000, project.buildCommand, packageManager)
 
       if (buildJob.status === 'failed') {
         logService.error('build', `Build failed for ${project.name}`, {

@@ -56,19 +56,30 @@ const openEditDialog = (connection: GitLabConnection) => {
 }
 
 const testConnection = async () => {
+  // 编辑已有连接且未改动 Token：直接按 id 在主进程侧测试（无需明文 token）
+  if (editingId.value && !connectionForm.value.token) {
+    testing.value = true
+    try {
+      const result = await window.electronAPI?.testGitLabConnectionById(editingId.value)
+      if (result?.success && result.data) {
+        ElMessage.success('连接测试成功')
+      } else {
+        ElMessage.error('连接测试失败: ' + (result?.error || '未知错误'))
+      }
+    } catch {
+      ElMessage.error('连接测试失败')
+    } finally {
+      testing.value = false
+    }
+    return
+  }
+
   if (!connectionForm.value.apiUrl) {
     ElMessage.warning('请填写 API URL')
     return
   }
 
-  // 编辑已有连接时，若未重新输入 Token，回填已保存 Token 用于测试
-  let testToken = connectionForm.value.token
-  if (!testToken && editingId.value) {
-    const saved = connections.value.find(c => c.id === editingId.value)
-    testToken = saved?.token || ''
-  }
-
-  if (!testToken) {
+  if (!connectionForm.value.token) {
     ElMessage.warning('请填写 Access Token')
     return
   }
@@ -77,7 +88,7 @@ const testConnection = async () => {
   try {
     const result = await window.electronAPI?.testGitLabConnection(
       connectionForm.value.apiUrl,
-      testToken
+      connectionForm.value.token
     )
     if (result?.success && result.data) {
       ElMessage.success('连接测试成功')

@@ -9,8 +9,6 @@ import { app } from 'electron'
 import {
   GitLabProject,
   GitLabProjectSchema,
-  DeploymentConfig,
-  DeploymentConfigSchema,
   Deployment,
   AppSettings,
   AppSettingsSchema,
@@ -18,7 +16,6 @@ import {
   GitLabConnectionSchema,
   Server,
   ServerSchema,
-  GitLabProjectResponse,
   MergeRequest
 } from '../../shared/types'
 import { gitLabService } from './GitLabService'
@@ -40,7 +37,6 @@ const getSettingsPath = () => path.join(getDataPath(), 'settings.json')
 // In-memory stores
 let settings: AppSettings | null = null
 const projects = new Map<string, GitLabProject>()
-const deploymentConfigs = new Map<string, DeploymentConfig>()
 
 // Getter functions for shared access
 export function getSettings(): AppSettings | null {
@@ -55,10 +51,6 @@ export function getAllProjects(): GitLabProject[] {
   return Array.from(projects.values())
 }
 
-export function getDeploymentConfigById(projectId: string): DeploymentConfig | undefined {
-  return deploymentConfigs.get(projectId)
-}
-
 // Ensure data directory exists
 async function ensureDataDir(): Promise<void> {
   await fs.mkdir(getProjectsPath(), { recursive: true })
@@ -70,6 +62,15 @@ function sendToAll(channel: string, ...args: unknown[]): void {
   BrowserWindow.getAllWindows().forEach(win => {
     win.webContents.send(channel, ...args)
   })
+}
+
+// 脱敏：返回给渲染进程前移除密码/Token，避免凭据泄漏到渲染层
+function sanitizeSettings(s: AppSettings): AppSettings {
+  return {
+    ...s,
+    gitlabConnections: (s.gitlabConnections || []).map(c => ({ ...c, token: '' })),
+    servers: (s.servers || []).map(sv => ({ ...sv, password: undefined }))
+  }
 }
 
 // Load data from disk
@@ -315,7 +316,6 @@ export async function registerIPCHandlers(): Promise<void> {
       }
 
       projects.delete(id)
-      deploymentConfigs.delete(id)
 
       // Remove from daemon monitoring
       daemonService.removeMonitoredProject(id)
@@ -333,28 +333,6 @@ export async function registerIPCHandlers(): Promise<void> {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete project'
-      }
-    }
-  })
-
-  // ==================== Deployment Configs ====================
-
-  ipcMain.handle('deployment-config:get', async (_event, projectId: string) => {
-    return {
-      success: true,
-      data: deploymentConfigs.get(projectId) || null
-    }
-  })
-
-  ipcMain.handle('deployment-config:save', async (_event, projectId: string, config: DeploymentConfig) => {
-    try {
-      DeploymentConfigSchema.parse(config)
-      deploymentConfigs.set(projectId, config)
-      return { success: true, data: config }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Invalid deployment config'
       }
     }
   })
@@ -397,9 +375,6 @@ export async function registerIPCHandlers(): Promise<void> {
       const deploymentId = await deploymentQueue.enqueue(project, mr)
 
       const deployment = deployService.getDeployment(deploymentId)
-      if (deployment) {
-        sendToAll('deployment:started', deployment)
-      }
 
       return { success: true, data: deployment }
     } catch (error) {
@@ -413,23 +388,6 @@ export async function registerIPCHandlers(): Promise<void> {
   ipcMain.handle('deployments:cancel', async (_event, deploymentId: string) => {
     const success = await deploymentQueue.cancel(deploymentId)
     return { success }
-  })
-
-  ipcMain.handle('deployments:rollback', async (_event, deploymentId: string) => {
-    try {
-      const deployment = deployService.getDeployment(deploymentId)
-      if (!deployment) {
-        return { success: false, error: 'Deployment not found' }
-      }
-
-      // Would need to get backup and server info
-      return { success: false, error: 'Rollback requires backup configuration' }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Rollback failed'
-      }
-    }
   })
 
   ipcMain.handle('deployments:logs', async (_event, deploymentId: string) => {
@@ -463,33 +421,43 @@ export async function registerIPCHandlers(): Promise<void> {
   // ==================== Settings ====================
 
   ipcMain.handle('settings:get', async () => {
-    return { success: true, data: settings }
+    return { success: true, data: settings ? sanitizeSettings(settings) : settings }
   })
 
   ipcMain.handle('settings:save', async (_event, newSettings: AppSettings) => {
     try {
-      AppSettingsSchema.parse(newSettings)
+      // 合并凭据：前端返回的 token/password 为空字符串时保留旧值（渲染层拿不到明文凭据）
+      const merged: AppSettings = {
+        ...newSettings,
+        gitlabConnections: (newSettings.gitlabConnections || []).map(c => {
+          const old = settings?.gitlabConnections?.find(o => o.id === c.id)
+          const token = c.token && c.token.trim() ? c.token : (old?.token || '')
+          return { ...c, token }
+        }),
+        servers: (newSettings.servers || []).map(sv => {
+          const old = settings?.servers?.find(o => o.id === sv.id)
+          const password = sv.password && sv.password.trim() ? sv.password : (old?.password || '')
+          return { ...sv, password }
+        })
+      }
 
-      // Check if daemon schedule settings changed
-      const oldScheduleEnabled = settings?.daemon?.scheduleEnabled
-      const oldStartTime = settings?.daemon?.startTime
-      const oldEndTime = settings?.daemon?.endTime
+      AppSettingsSchema.parse(merged)
 
-      settings = newSettings
+      settings = merged
       await saveSettingsData()
 
       // Update daemon schedule if settings changed and daemon is running
-      if (newSettings.daemon?.scheduleEnabled !== undefined) {
+      if (merged.daemon?.scheduleEnabled !== undefined) {
         daemonService.updateScheduleSettings(
-          newSettings.daemon.scheduleEnabled,
-          newSettings.daemon.startTime || '09:00',
-          newSettings.daemon.endTime || '18:00'
+          merged.daemon.scheduleEnabled,
+          merged.daemon.startTime || '09:00',
+          merged.daemon.endTime || '18:00'
         )
       }
 
-      sendToAll('settings:updated', settings)
+      sendToAll('settings:updated', sanitizeSettings(merged))
 
-      return { success: true, data: settings }
+      return { success: true, data: sanitizeSettings(merged) }
     } catch (error) {
       return {
         success: false,
@@ -501,12 +469,12 @@ export async function registerIPCHandlers(): Promise<void> {
   // ==================== GitLab Connections ====================
 
   ipcMain.handle('gitlab-connections:list', async () => {
-    return { success: true, data: settings?.gitlabConnections || [] }
+    return { success: true, data: (settings?.gitlabConnections || []).map(c => ({ ...c, token: '' })) }
   })
 
   ipcMain.handle('gitlab-connections:get', async (_event, id: string) => {
     const connection = settings?.gitlabConnections?.find(c => c.id === id)
-    return { success: !!connection, data: connection || null, error: connection ? undefined : 'Connection not found' }
+    return { success: !!connection, data: connection ? { ...connection, token: '' } : null, error: connection ? undefined : 'Connection not found' }
   })
 
   ipcMain.handle('gitlab-connections:create', async (_event, connectionData: Omit<GitLabConnection, 'id'>) => {
@@ -523,7 +491,7 @@ export async function registerIPCHandlers(): Promise<void> {
       settings!.gitlabConnections.push(connection)
       await saveSettingsData()
 
-      return { success: true, data: connection }
+      return { success: true, data: { ...connection, token: '' } }
     } catch (error) {
       return {
         success: false,
@@ -549,7 +517,7 @@ export async function registerIPCHandlers(): Promise<void> {
       settings!.gitlabConnections![index] = updated
       await saveSettingsData()
 
-      return { success: true, data: updated }
+      return { success: true, data: { ...updated, token: '' } }
     } catch (error) {
       return {
         success: false,
@@ -582,15 +550,25 @@ export async function registerIPCHandlers(): Promise<void> {
     return { success: true, data: success }
   })
 
+  // 按 id 测试已保存的连接（主进程内部取 token，避免明文 token 经过渲染层）
+  ipcMain.handle('gitlab-connections:test-by-id', async (_event, id: string) => {
+    const connection = settings?.gitlabConnections?.find(c => c.id === id)
+    if (!connection) {
+      return { success: false, error: 'Connection not found' }
+    }
+    const ok = await credentialService.testGitLabConnection(connection.apiUrl, connection.token)
+    return { success: true, data: ok }
+  })
+
   // ==================== Servers ====================
 
   ipcMain.handle('servers:list', async () => {
-    return { success: true, data: settings?.servers || [] }
+    return { success: true, data: (settings?.servers || []).map(s => ({ ...s, password: undefined })) }
   })
 
   ipcMain.handle('servers:get', async (_event, id: string) => {
     const server = settings?.servers?.find(s => s.id === id)
-    return { success: !!server, data: server || null, error: server ? undefined : 'Server not found' }
+    return { success: !!server, data: server ? { ...server, password: undefined } : null, error: server ? undefined : 'Server not found' }
   })
 
   ipcMain.handle('servers:create', async (_event, serverData: Omit<Server, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -610,7 +588,7 @@ export async function registerIPCHandlers(): Promise<void> {
       settings!.servers.push(server)
       await saveSettingsData()
 
-      return { success: true, data: server }
+      return { success: true, data: { ...server, password: undefined } }
     } catch (error) {
       return {
         success: false,
@@ -627,11 +605,17 @@ export async function registerIPCHandlers(): Promise<void> {
       }
 
       const now = new Date()
+      // 认证方式切换为私钥时清除残留的明文密码
+      const prev = settings!.servers![index]
+      if (updates.authType === 'privateKey') {
+        updates = { ...updates, password: undefined }
+      }
+
       const updated: Server = {
-        ...settings!.servers![index],
+        ...prev,
         ...updates,
         id, // Ensure ID cannot be changed
-        createdAt: settings!.servers![index].createdAt,
+        createdAt: prev.createdAt,
         updatedAt: now
       }
 
@@ -639,7 +623,7 @@ export async function registerIPCHandlers(): Promise<void> {
       settings!.servers![index] = updated
       await saveSettingsData()
 
-      return { success: true, data: updated }
+      return { success: true, data: { ...updated, password: undefined } }
     } catch (error) {
       return {
         success: false,
@@ -678,6 +662,23 @@ export async function registerIPCHandlers(): Promise<void> {
   ) => {
     const success = await credentialService.testSSHConnection(host, port, username, authType, privateKey, password)
     return { success: true, data: success }
+  })
+
+  // 按 id 测试已保存的服务器（主进程内部取密码，避免明文密码经过渲染层）
+  ipcMain.handle('servers:test-ssh-by-id', async (_event, id: string) => {
+    const server = settings?.servers?.find(s => s.id === id)
+    if (!server) {
+      return { success: false, error: 'Server not found' }
+    }
+    const ok = await credentialService.testSSHConnection(
+      server.host,
+      server.port,
+      server.username,
+      server.authType || 'privateKey',
+      undefined,
+      server.password
+    )
+    return { success: true, data: ok }
   })
 
   // ==================== Notifications ====================
@@ -941,6 +942,10 @@ export async function registerIPCHandlers(): Promise<void> {
 
 // Set up deployment update callbacks
 export function setupDeploymentCallbacks(): void {
+  deploymentQueue.setStartedCallback((deployment) => {
+    sendToAll('deployment:started', deployment)
+  })
+
   deploymentQueue.setUpdateCallback((deployment) => {
     sendToAll('deployment:progress', {
       deploymentId: deployment.id,

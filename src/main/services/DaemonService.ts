@@ -408,7 +408,15 @@ class DaemonService {
       // Connect to GitLab if needed
       await gitLabService.connect(connection)
 
-      const gitlabProjectId = project.gitlabId?.toString() || project.id
+      // 项目未配置 GitLab 数字 ID 时无法调 API，跳过并告警，避免把本地 UUID 当项目 ID 请求导致 404
+      if (!project.gitlabId) {
+        logService.warn('gitlab-poll', `Project ${project.name} 未配置 GitLab ID，跳过轮询`, {
+          projectId: project.id
+        })
+        return
+      }
+
+      const gitlabProjectId = project.gitlabId.toString()
       let shouldDeploy = false
       let deployReason = ''
 

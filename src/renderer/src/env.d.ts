@@ -10,16 +10,11 @@ declare global {
       updateProject: (id: string, updates: Partial<import('../shared/types').GitLabProject>) => Promise<{ success: boolean; data?: import('../shared/types').GitLabProject; error?: string }>
       deleteProject: (id: string) => Promise<{ success: boolean; error?: string }>
 
-      // Deployment Configs
-      getDeploymentConfig: (projectId: string) => Promise<{ success: boolean; data?: import('../shared/types').DeploymentConfig | null; error?: string }>
-      saveDeploymentConfig: (projectId: string, config: import('../shared/types').DeploymentConfig) => Promise<{ success: boolean; data?: import('../shared/types').DeploymentConfig; error?: string }>
-
       // Deployments
       getDeployments: (projectId?: string) => Promise<{ success: boolean; data?: import('../shared/types').Deployment[]; error?: string }>
       getDeployment: (id: string) => Promise<{ success: boolean; data?: import('../shared/types').Deployment | null; error?: string }>
       startDeployment: (projectId: string, mergeRequestId: string) => Promise<{ success: boolean; data?: import('../shared/types').Deployment; error?: string }>
       cancelDeployment: (deploymentId: string) => Promise<{ success: boolean; data?: boolean; error?: string }>
-      rollbackDeployment: (deploymentId: string) => Promise<{ success: boolean; error?: string }>
       getDeploymentLogs: (deploymentId: string) => Promise<{ success: boolean; data?: string[]; error?: string }>
       openWorkspace: (projectId: string) => Promise<{ success: boolean; error?: string }>
 
@@ -41,8 +36,10 @@ declare global {
       showNotification: (options: { title: string; body: string; type?: string }) => Promise<{ success: boolean; error?: string }>
 
       // GitLab Service
-      fetchGitLabProjects: () => Promise<{ success: boolean; data?: import('../shared/types').GitLabProject[]; error?: string }>
+      fetchGitLabProjects: () => Promise<{ success: boolean; data?: import('../shared/types').GitLabProjectResponse[]; error?: string }>
       fetchMergeRequests: (projectId: string, targetBranch: string) => Promise<{ success: boolean; data?: import('../shared/types').MergeRequest[]; error?: string }>
+      testGitLabConnectionById: (id: string) => Promise<{ success: boolean; data?: boolean; error?: string }>
+      testSSHConnectionById: (id: string) => Promise<{ success: boolean; data?: boolean; error?: string }>
 
       // Daemon
       startDaemon: () => Promise<{ success: boolean; error?: string }>

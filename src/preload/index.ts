@@ -5,7 +5,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   GitLabProject,
-  DeploymentConfig,
   Deployment,
   AppSettings,
   GitLabConnection,
@@ -43,16 +42,11 @@ interface ElectronAPI {
   updateProject: (id: string, updates: Partial<GitLabProject>) => Promise<IPCResult<GitLabProject>>
   deleteProject: (id: string) => Promise<IPCResult<void>>
 
-  // Deployment Configs
-  getDeploymentConfig: (projectId: string) => Promise<IPCResult<DeploymentConfig | null>>
-  saveDeploymentConfig: (projectId: string, config: DeploymentConfig) => Promise<IPCResult<DeploymentConfig>>
-
   // Deployments
   getDeployments: (projectId?: string) => Promise<IPCResult<Deployment[]>>
   getDeployment: (id: string) => Promise<IPCResult<Deployment | null>>
   startDeployment: (projectId: string, mergeRequestId: string) => Promise<IPCResult<Deployment>>
   cancelDeployment: (deploymentId: string) => Promise<IPCResult<boolean>>
-  rollbackDeployment: (deploymentId: string) => Promise<IPCResult<void>>
   getDeploymentLogs: (deploymentId: string) => Promise<IPCResult<string[]>>
   deleteDeployment: (deploymentId: string) => Promise<IPCResult<boolean>>
   openWorkspace: (projectId: string) => Promise<IPCResult<void>>
@@ -68,6 +62,7 @@ interface ElectronAPI {
   updateGitLabConnection: (id: string, updates: Partial<GitLabConnection>) => Promise<IPCResult<GitLabConnection>>
   deleteGitLabConnection: (id: string) => Promise<IPCResult<void>>
   testGitLabConnection: (apiUrl: string, token: string) => Promise<IPCResult<boolean>>
+  testGitLabConnectionById: (id: string) => Promise<IPCResult<boolean>>
 
   // Servers (multi-server support)
   getServers: () => Promise<IPCResult<Server[]>>
@@ -83,6 +78,7 @@ interface ElectronAPI {
     privateKey?: string,
     password?: string
   ) => Promise<IPCResult<boolean>>
+  testSSHConnectionById: (id: string) => Promise<IPCResult<boolean>>
 
   // Notifications
   showNotification: (options: { title: string; body: string; type?: string }) => Promise<IPCResult<void>>
@@ -141,16 +137,11 @@ const api: ElectronAPI = {
   updateProject: (id, updates) => ipcRenderer.invoke('projects:update', id, updates),
   deleteProject: (id) => ipcRenderer.invoke('projects:delete', id),
 
-  // Deployment Configs
-  getDeploymentConfig: (projectId) => ipcRenderer.invoke('deployment-config:get', projectId),
-  saveDeploymentConfig: (projectId, config) => ipcRenderer.invoke('deployment-config:save', projectId, config),
-
   // Deployments
   getDeployments: (projectId) => ipcRenderer.invoke('deployments:get', projectId),
   getDeployment: (id) => ipcRenderer.invoke('deployments:get-one', id),
   startDeployment: (projectId, mergeRequestId) => ipcRenderer.invoke('deployments:start', projectId, mergeRequestId),
   cancelDeployment: (deploymentId) => ipcRenderer.invoke('deployments:cancel', deploymentId),
-  rollbackDeployment: (deploymentId) => ipcRenderer.invoke('deployments:rollback', deploymentId),
   getDeploymentLogs: (deploymentId) => ipcRenderer.invoke('deployments:logs', deploymentId),
   deleteDeployment: (deploymentId) => ipcRenderer.invoke('deployments:delete', deploymentId),
   openWorkspace: (projectId) => ipcRenderer.invoke('deployments:open-workspace', projectId),
@@ -166,6 +157,7 @@ const api: ElectronAPI = {
   updateGitLabConnection: (id, updates) => ipcRenderer.invoke('gitlab-connections:update', id, updates),
   deleteGitLabConnection: (id) => ipcRenderer.invoke('gitlab-connections:delete', id),
   testGitLabConnection: (apiUrl, token) => ipcRenderer.invoke('gitlab-connections:test', apiUrl, token),
+  testGitLabConnectionById: (id) => ipcRenderer.invoke('gitlab-connections:test-by-id', id),
 
   // Servers (multi-server support)
   getServers: () => ipcRenderer.invoke('servers:list'),
@@ -175,6 +167,7 @@ const api: ElectronAPI = {
   deleteServer: (id) => ipcRenderer.invoke('servers:delete', id),
   testSSHConnection: (host, port, username, authType, privateKey, password) =>
     ipcRenderer.invoke('servers:test-ssh', host, port, username, authType, privateKey, password),
+  testSSHConnectionById: (id) => ipcRenderer.invoke('servers:test-ssh-by-id', id),
 
   // Notifications
   showNotification: (options) => ipcRenderer.invoke('notification:show', options),

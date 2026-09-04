@@ -101,6 +101,30 @@ export class BuildService {
     return rel.split(path.sep)[0] || path.basename(projectPath)
   }
 
+  /**
+   * 分平台执行 shell 命令并纳入取消追踪。
+   * Windows 用 cmd.exe，macOS/Linux 用登录 shell；统一扩展 PATH。
+   */
+  private runShell(
+    projectId: string,
+    command: string,
+    opts: { cwd: string; timeout: number; all?: boolean }
+  ): ReturnType<typeof execa> {
+    const isWindows = process.platform === 'win32'
+    const file = isWindows ? (process.env.COMSPEC || 'cmd.exe') : (process.env.SHELL || '/bin/bash')
+    const args = isWindows ? ['/d', '/s', '/c', command] : ['-l', '-c', command]
+
+    return this.runTracked(projectId, file, args, {
+      cwd: opts.cwd,
+      timeout: opts.timeout,
+      all: opts.all,
+      env: {
+        ...process.env,
+        PATH: this.getEnvPath()
+      }
+    })
+  }
+
   private async ensureDirectory(dir: string): Promise<void> {
     await fs.mkdir(dir, { recursive: true })
   }
@@ -202,16 +226,16 @@ export class BuildService {
       // Pull latest changes
       logger.info('build', `Pulling latest changes for project ${project.id}`)
 
-      await execa('git', ['fetch', 'origin'], { cwd: projectPath })
+      await this.runTracked(project.id, 'git', ['fetch', 'origin'], { cwd: projectPath })
 
       if (commitSha) {
         // 回滚模式：checkout 到指定 commit
         logger.info('build', `Checking out commit ${commitSha} for rollback`)
-        await execa('git', ['checkout', commitSha], { cwd: projectPath })
+        await this.runTracked(project.id, 'git', ['checkout', commitSha], { cwd: projectPath })
       } else {
         // 正常模式：checkout branch 并 pull
-        await execa('git', ['checkout', branch], { cwd: projectPath })
-        await execa('git', ['pull', 'origin', branch], { cwd: projectPath })
+        await this.runTracked(project.id, 'git', ['checkout', branch], { cwd: projectPath })
+        await this.runTracked(project.id, 'git', ['pull', 'origin', branch], { cwd: projectPath })
       }
     } catch {
       // Clone fresh
@@ -222,25 +246,28 @@ export class BuildService {
       // Construct clone URL using gitlabUrl + gitlabPath
       // Priority: gitlabUrl parameter > project.url
       let cloneUrl: string
+      let cleanUrl: string // 不包含 token 的 URL，用于写回 .git/config
 
       if (gitlabUrl) {
         // Use provided GitLab URL with project path
         const apiUrl = gitlabUrl.replace(/\/+$/, '')
-        // Use OAuth2 token authentication if provided
-        // Correct format: http://oauth2:TOKEN@host:port/path.git
         if (token) {
           const urlObj = new URL(apiUrl)
           cloneUrl = `${urlObj.protocol}//oauth2:${token}@${urlObj.host}/${project.gitlabPath}.git`
+          cleanUrl = `${apiUrl}/${project.gitlabPath}.git`
         } else {
           cloneUrl = `${apiUrl}/${project.gitlabPath}.git`
+          cleanUrl = cloneUrl
         }
       } else if (project.url) {
         // Fallback to project.url if available
         const parsedUrl = new URL(project.url)
         if (token) {
           cloneUrl = `https://oauth2:${token}@${parsedUrl.host}${parsedUrl.pathname}.git`
+          cleanUrl = `${project.url}.git`
         } else {
           cloneUrl = `${project.url}.git`
+          cleanUrl = cloneUrl
         }
       } else {
         throw new Error('GitLab URL is required. Please configure GitLab connection in settings.')
@@ -248,12 +275,24 @@ export class BuildService {
 
       logger.info('build', `Cloning from ${cloneUrl.replace(/oauth2:[^@]+@/, 'oauth2:***@')}`)
 
-      await execa('git', ['clone', '-b', branch, cloneUrl, projectPath])
+      await this.runTracked(project.id, 'git', ['clone', '-b', branch, cloneUrl, projectPath])
+
+      // 克隆后立即清除 .git/config 中带 token 的 remote URL，避免 token 泄漏到工作区
+      if (cleanUrl !== cloneUrl) {
+        try {
+          await execa('git', ['remote', 'set-url', 'origin', cleanUrl], { cwd: projectPath })
+          logger.info('build', `Sanitized origin remote URL for ${project.id}`)
+        } catch (err) {
+          logger.warn('build', `Failed to sanitize origin remote URL for ${project.id}`, {
+            error: err instanceof Error ? err.message : 'Unknown error'
+          })
+        }
+      }
 
       if (commitSha) {
         // 克隆后 checkout 到指定 commit
         logger.info('build', `Checking out commit ${commitSha} after clone`)
-        await execa('git', ['checkout', commitSha], { cwd: projectPath })
+        await this.runTracked(project.id, 'git', ['checkout', commitSha], { cwd: projectPath })
       }
     }
 
@@ -320,8 +359,6 @@ export class BuildService {
   ): Promise<void> {
     logger.info('build', `Installing dependencies with ${packageManager}`)
 
-    const shell = process.env.SHELL || '/bin/zsh'
-
     const commands: Record<PackageManager, string> = {
       npm: 'npm install --ignore-scripts',
       yarn: 'yarn install --ignore-scripts',
@@ -330,13 +367,9 @@ export class BuildService {
 
     const command = commands[packageManager]
 
-    await this.runTracked(this.getProjectIdFromPath(projectPath), shell, ['-l', '-c', command], {
+    await this.runShell(this.getProjectIdFromPath(projectPath), command, {
       cwd: projectPath,
-      timeout: 300000, // 5 minutes timeout for install
-      env: {
-        ...process.env,
-        PATH: this.getEnvPath()
-      }
+      timeout: 300000 // 5 minutes timeout for install
     })
   }
 
@@ -369,12 +402,13 @@ export class BuildService {
     projectPath: string,
     command: string,
     timeout: number = 600000,
-    customBuildCommand?: string // 自定义构建命令，如 "npm run build:prod"
+    customBuildCommand?: string, // 自定义构建命令，如 "npm run build:prod"
+    packageManager: PackageManager = 'npm'
   ): Promise<BuildJob> {
     const jobId = crypto.randomUUID()
     const startTime = new Date()
 
-    logger.info('build', `Starting build job ${jobId}`, { command, customBuildCommand, timeout })
+    logger.info('build', `Starting build job ${jobId}`, { command, customBuildCommand, packageManager, timeout })
 
     const job: BuildJob = {
       id: jobId,
@@ -387,25 +421,14 @@ export class BuildService {
     }
 
     try {
-      const shell = process.env.SHELL || '/bin/zsh'
+      // 如果有自定义构建命令，直接使用；否则用检测到的包管理器执行对应的 build 脚本
+      const buildCommand = customBuildCommand || `${packageManager} run ${command}`
 
-      // 如果有自定义构建命令，直接使用；否则使用自动检测的命令
-      const buildCommand = customBuildCommand || `npm run ${command}`
-
-      const result = await this.runTracked(
-        this.getProjectIdFromPath(projectPath),
-        shell,
-        ['-l', '-c', buildCommand],
-        {
-          cwd: projectPath,
-          timeout,
-          all: true,
-          env: {
-            ...process.env,
-            PATH: this.getEnvPath()
-          }
-        }
-      )
+      const result = await this.runShell(this.getProjectIdFromPath(projectPath), buildCommand, {
+        cwd: projectPath,
+        timeout,
+        all: true
+      })
 
       // Wait a moment for file system to sync (especially for background processes in build scripts)
       await new Promise(resolve => setTimeout(resolve, 1000))

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 type LogCategory = 'gitlab-poll' | 'build' | 'deploy' | 'daemon'
@@ -110,20 +110,36 @@ const handleCategoryChange = () => {
 onMounted(() => {
   loadLogs()
   loadStats()
-
-  if (autoRefresh.value) {
-    refreshInterval.value = window.setInterval(() => {
-      loadLogs()
-      loadStats()
-    }, 5000)
-  }
+  startRefresh()
 })
 
 onUnmounted(() => {
-  if (refreshInterval.value) {
-    clearInterval(refreshInterval.value)
+  stopRefresh()
+})
+
+// 自动刷新开关变化时启停定时器
+watch(autoRefresh, (enabled) => {
+  if (enabled) {
+    startRefresh()
+  } else {
+    stopRefresh()
   }
 })
+
+function startRefresh() {
+  if (refreshInterval.value) return
+  refreshInterval.value = window.setInterval(() => {
+    loadLogs()
+    loadStats()
+  }, 5000)
+}
+
+function stopRefresh() {
+  if (refreshInterval.value) {
+    clearInterval(refreshInterval.value)
+    refreshInterval.value = undefined
+  }
+}
 </script>
 
 <template>

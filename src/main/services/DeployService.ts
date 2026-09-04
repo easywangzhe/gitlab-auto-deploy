@@ -13,20 +13,24 @@ import {
   DeploymentArtifact,
   Server,
   SSHCredentials,
-  Backup,
-  BackupSchema,
   HealthCheck,
-  MergeRequest,
-  RollbackStatusEnum
+  MergeRequest
 } from '../../shared/types'
 import { logger } from '../utils/logger'
 import { app } from 'electron'
 import * as crypto from 'crypto'
 
+/** 健康检查遇到重定向时抛出，由外层循环跟随 */
+class RedirectError extends Error {
+  url: string
+  constructor(url: string) {
+    super(`Redirect to ${url}`)
+    this.url = url
+  }
+}
+
 export class DeployService {
   private deployments: Map<string, Deployment> = new Map()
-  private backups: Map<string, Backup[]> = new Map()
-  private readonly MAX_BACKUPS = 3
   private deploymentsPath: string | null = null
 
   private getDeploymentsPath(): string {
@@ -191,159 +195,6 @@ export class DeployService {
     })
   }
 
-  async createBackup(
-    server: Server,
-    credentials: SSHCredentials,
-    deployPath: string
-  ): Promise<Backup | null> {
-    logger.info('deploy', `Creating backup on ${server.host}`)
-
-    const client = await this.connectSSH(server, credentials)
-    const backupId = crypto.randomUUID()
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const backupDir = `${deployPath}.backup-${timestamp}`
-
-    return new Promise((resolve, reject) => {
-      // First check if deploy path exists
-      client.exec(
-        `test -d ${deployPath} && echo "exists" || echo "not_exists"`,
-        (err, stream) => {
-          if (err) {
-            client.end()
-            reject(err)
-            return
-          }
-
-          let output = ''
-          stream.on('data', (data: Buffer) => {
-            output += data.toString()
-          })
-
-          stream.on('close', () => {
-            if (output.trim() === 'not_exists') {
-              // Deploy path doesn't exist, skip backup
-              logger.info('deploy', `Deploy path ${deployPath} does not exist, skipping backup`)
-              client.end()
-              resolve(null)
-              return
-            }
-
-            // Deploy path exists, create backup using cp -r
-            client.exec(
-              `cp -r ${deployPath} ${backupDir}`,
-              (err, stream) => {
-                if (err) {
-                  client.end()
-                  reject(err)
-                  return
-                }
-
-                // Must read stdout/stderr to prevent buffer blocking
-                let stdout = ''
-                let stderr = ''
-                stream.on('data', (data: Buffer) => {
-                  stdout += data.toString()
-                })
-                stream.stderr.on('data', (data: Buffer) => {
-                  stderr += data.toString()
-                })
-
-                stream.on('close', (code: number | null) => {
-                  client.end()
-
-                  if (code !== 0 && code !== null) {
-                    logger.error('deploy', `Backup command failed with exit code ${code}`, { stdout, stderr })
-                    reject(new Error(`Backup failed with exit code ${code}: ${stderr || stdout}`))
-                    return
-                  }
-
-                  const backup = BackupSchema.parse({
-                    id: backupId,
-                    serverId: server.id,
-                    path: backupDir,
-                    version: timestamp,
-                    createdAt: new Date()
-                  })
-
-                  // Store backup
-                  const serverBackups = this.backups.get(server.id) || []
-                  serverBackups.push(backup)
-                  this.backups.set(server.id, serverBackups)
-
-                  // Clean old backups (async, don't wait)
-                  this.cleanOldBackups(server.id, credentials, server, deployPath).catch(() => {})
-
-                  logger.info('deploy', `Backup created: ${backupDir}`)
-                  resolve(backup)
-                })
-
-                stream.on('error', (err: Error) => {
-                  client.end()
-                  reject(err)
-                })
-              }
-            )
-          })
-
-          stream.on('error', reject)
-        }
-      )
-    })
-  }
-
-  private async cleanOldBackups(
-    serverId: string,
-    credentials: SSHCredentials,
-    server: Server
-  ): Promise<void> {
-    const backups = this.backups.get(serverId) || []
-
-    if (backups.length > this.MAX_BACKUPS) {
-      const toDelete = backups.slice(0, backups.length - this.MAX_BACKUPS)
-
-      for (const backup of toDelete) {
-        try {
-          const client = await this.connectSSH(server, credentials)
-          await new Promise<void>((resolve, reject) => {
-            client.exec(`rm -rf ${backup.path}`, (err, stream) => {
-              if (err) {
-                reject(err)
-                return
-              }
-
-              // Must read stream data to prevent blocking
-              stream.on('data', () => {})
-              stream.stderr.on('data', () => {})
-
-              stream.on('close', () => {
-                client.end()
-                resolve()
-              })
-              stream.on('error', (err: Error) => {
-                client.end()
-                reject(err)
-              })
-            })
-          })
-
-          // Remove from memory
-          const remaining = this.backups.get(serverId) || []
-          const idx = remaining.findIndex((b) => b.id === backup.id)
-          if (idx >= 0) {
-            remaining.splice(idx, 1)
-            this.backups.set(serverId, remaining)
-          }
-
-          logger.info('deploy', `Deleted old backup: ${backup.path}`)
-        } catch (error) {
-          logger.error('deploy', `Failed to delete backup ${backup.path}`, {
-            error
-          })
-        }
-      }
-    }
-  }
-
   async uploadArtifact(
     artifact: DeploymentArtifact,
     server: Server,
@@ -440,8 +291,8 @@ export class DeployService {
   }
 
   async healthCheck(url: string, config: HealthCheck): Promise<boolean> {
-    const urlObj = new URL(url)
-    const httpClient = urlObj.protocol === 'https:' ? https : http
+    const MAX_REDIRECTS = 5
+    let currentUrl = url
 
     for (let attempt = 0; attempt <= config.retryCount; attempt++) {
       if (attempt > 0) {
@@ -450,40 +301,32 @@ export class DeployService {
       }
 
       try {
-        const success = await new Promise<boolean>((resolve, reject) => {
-          const req = httpClient.get(
-            url,
-            {
-              timeout: config.timeout
-            },
-            (res) => {
-              // Handle redirects (301, 302, 303, 307, 308)
-              if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                logger.info('deploy', `Health check redirect to ${res.headers.location}`)
-                // Recursively check the redirect location
-                this.healthCheck(res.headers.location, config)
-                  .then(resolve)
-                  .catch(reject)
-                return
-              }
-              resolve(res.statusCode === config.expectedStatusCode)
+        let redirects = 0
+        // 每次尝试内可跟随有限次重定向（防重定向环导致无限递归）
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          try {
+            const ok = await this.checkHealthOnce(currentUrl, config)
+            if (ok) {
+              logger.info('deploy', `Health check passed: ${currentUrl}`)
+              return true
             }
-          )
-
-          req.on('error', reject)
-          req.on('timeout', () => {
-            req.destroy()
-            reject(new Error('Health check timeout'))
-          })
-        })
-
-        if (success) {
-          logger.info('deploy', `Health check passed: ${url}`)
-          return true
+            break // 非重定向的响应但状态码不匹配 → 进入下一次 retry
+          } catch (error) {
+            if (error instanceof RedirectError) {
+              if (redirects >= MAX_REDIRECTS) {
+                throw new Error(`Health check exceeded ${MAX_REDIRECTS} redirects`)
+              }
+              currentUrl = error.url
+              redirects++
+              continue
+            }
+            throw error
+          }
         }
       } catch (error) {
         logger.warn('deploy', `Health check attempt ${attempt + 1} failed`, {
-          error
+          error: error instanceof Error ? error.message : String(error)
         })
       }
     }
@@ -492,64 +335,41 @@ export class DeployService {
     return false
   }
 
-  async rollback(
-    backup: Backup,
-    server: Server,
-    credentials: SSHCredentials,
-    deployPath: string
-  ): Promise<void> {
-    logger.info('deploy', `Starting rollback to ${backup.path}`)
+  /**
+   * 单次健康检查请求：返回状态码是否匹配；遇到重定向抛 RedirectError
+   */
+  private checkHealthOnce(url: string, config: HealthCheck): Promise<boolean> {
+    const urlObj = new URL(url)
+    const httpClient = urlObj.protocol === 'https:' ? https : http
 
-    const client = await this.connectSSH(server, credentials)
-    const timestamp = Date.now()
-    const tempOld = `${deployPath}.old-${timestamp}`
-
-    return new Promise((resolve, reject) => {
-      // Use atomic directory swap with mv (instant) instead of slow rm -rf && cp -r
-      // 1. Move current deploy to temp (mv is instant)
-      // 2. Move backup to deploy path (mv is instant)
-      // 3. Remove temp in background (non-blocking)
-      const command = `mv ${deployPath} ${tempOld} 2>/dev/null || true; mv ${backup.path} ${deployPath} && (rm -rf ${tempOld} &)`
-
-      client.exec(command, (err, stream) => {
-        if (err) {
-          client.end()
-          reject(err)
-          return
-        }
-
-        // Must read stream data to prevent blocking
-        let stderr = ''
-        stream.on('data', () => {})
-        stream.stderr.on('data', (data: Buffer) => {
-          stderr += data.toString()
-        })
-
-        stream.on('close', (code: number | null) => {
-          client.end()
-          if (code !== 0 && code !== null) {
-            logger.error('deploy', `Rollback failed with exit code ${code}`, { stderr })
-            reject(new Error(`Rollback failed with exit code ${code}: ${stderr}`))
+    return new Promise<boolean>((resolve, reject) => {
+      const req = httpClient.get(
+        url,
+        { timeout: config.timeout },
+        (res) => {
+          // 排空响应体，避免连接挂起
+          res.resume()
+          // Handle redirects (301, 302, 303, 307, 308)
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            const redirectUrl = new URL(res.headers.location, url).toString()
+            logger.info('deploy', `Health check redirect to ${redirectUrl}`)
+            reject(new RedirectError(redirectUrl))
             return
           }
-          logger.info('deploy', 'Rollback completed')
-          resolve()
-        })
+          resolve(res.statusCode === config.expectedStatusCode)
+        }
+      )
 
-        stream.on('error', (err: Error) => {
-          client.end()
-          reject(err)
-        })
+      req.on('error', reject)
+      req.on('timeout', () => {
+        req.destroy()
+        reject(new Error('Health check timeout'))
       })
     })
   }
 
   getDeploymentStatus(deploymentId: string): Deployment | null {
     return this.deployments.get(deploymentId) || null
-  }
-
-  getBackups(serverId: string): Backup[] {
-    return this.backups.get(serverId) || []
   }
 
   getDeployment(deploymentId: string): Deployment | undefined {

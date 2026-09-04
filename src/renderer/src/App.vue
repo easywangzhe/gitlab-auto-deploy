@@ -110,7 +110,7 @@ watch(() => settingsStore.settings?.theme, (newTheme) => {
       </el-menu>
 
       <div class="sidebar-footer">
-        <el-tag size="small" type="info">v1.0.0</el-tag>
+        <el-tag size="small" type="info">v1.1.1</el-tag>
       </div>
     </el-aside>
 

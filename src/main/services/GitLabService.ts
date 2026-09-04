@@ -19,6 +19,8 @@ export class GitLabService {
   private pollingInterval: NodeJS.Timeout | null = null
   private lastCheckTimes: Map<string, Date> = new Map()
   private lastKnownShas: Map<string, string> = new Map()
+  private lastHost: string | null = null
+  private lastToken: string | null = null
 
   async connect(config: GitLabConnection): Promise<void> {
     this.config = config
@@ -26,12 +28,17 @@ export class GitLabService {
     // Ensure apiUrl doesn't have trailing slash
     const apiUrl = config.apiUrl.replace(/\/+$/, '')
 
+    // 连接复用：相同 apiUrl + token 已建连则跳过重复 verify，避免每次轮询都重建实例并做额外网络往返
+    if (this.api && this.lastHost === apiUrl && this.lastToken === config.token) {
+      return
+    }
+
     logger.info('gitlab', `Connecting to GitLab at ${apiUrl}`, {
       tokenLength: config.token?.length || 0,
       tokenPrefix: config.token?.substring(0, 4) + '...'
     })
 
-    this.api = new Gitlab({
+    const api = new Gitlab({
       host: apiUrl,
       token: config.token,
       requestOptions: {
@@ -39,16 +46,19 @@ export class GitLabService {
       }
     })
 
-    logger.info('gitlab', `Connected to GitLab at ${config.apiUrl}`)
-
     // Test connection
     try {
-      await this.api.Users.showCurrentUser()
+      await api.Users.showCurrentUser()
       logger.info('gitlab', 'GitLab connection verified')
     } catch (error) {
       logger.error('gitlab', 'Failed to verify GitLab connection', { error })
       throw error
     }
+
+    // 仅在验证通过后切换当前实例
+    this.api = api
+    this.lastHost = apiUrl
+    this.lastToken = config.token
   }
 
   startPolling(
