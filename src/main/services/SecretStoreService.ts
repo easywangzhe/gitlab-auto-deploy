@@ -89,6 +89,35 @@ export class CredentialService {
     return decrypted
   }
 
+  /**
+   * 加密任意字符串（用于 settings.json 中 password/token 的落盘加密）。
+   * 返回 JSON 字符串，写入 settings 后整体仍是合法 JSON。
+   */
+  async encryptString(plaintext: string): Promise<string> {
+    const enc = await this.encrypt(plaintext)
+    return JSON.stringify(enc)
+  }
+
+  /**
+   * 解密由 encryptString 加密的字符串。
+   * 传入非加密格式（如旧的明文迁移场景）时抛出异常，由调用方决定回退。
+   */
+  async decryptString(payload: unknown): Promise<string> {
+    if (typeof payload !== 'string') {
+      throw new Error('Invalid encrypted payload')
+    }
+    let data: EncryptedData
+    try {
+      data = JSON.parse(payload) as EncryptedData
+    } catch {
+      throw new Error('Invalid encrypted payload')
+    }
+    if (!data || typeof data.encrypted !== 'string' || typeof data.iv !== 'string' || typeof data.authTag !== 'string') {
+      throw new Error('Invalid encrypted payload')
+    }
+    return this.decrypt(data)
+  }
+
   private getGitLabTokenPath(projectId: string): string {
     return path.join(this.credentialsPath, `gitlab-${projectId}.json`)
   }

@@ -358,7 +358,13 @@ export const AppSettingsSchema = z.object({
     scheduleEnabled: z.boolean().default(false),
     startTime: z.string().default('09:00'),      // 开始时间 HH:mm
     endTime: z.string().default('18:00')         // 结束时间 HH:mm
-  })
+  }),
+  deploymentRetention: z.number().int().positive().default(20), // 每项目保留的部署记录数
+  inboundWebhook: z.object({
+    enabled: z.boolean().default(false),
+    port: z.number().int().positive().default(8899),
+    secret: z.string().default('')
+  }).default({})
 })
 export interface AppSettings extends z.infer<typeof AppSettingsSchema> {}
 

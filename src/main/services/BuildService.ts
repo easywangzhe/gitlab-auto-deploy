@@ -353,6 +353,44 @@ export class BuildService {
     return 'pnpm'
   }
 
+  /**
+   * 依赖是否变化：用 package.json + 锁文件内容哈希判断；
+   * 未变化且 node_modules 存在时返回 false（可跳过安装）。
+   */
+  async dependenciesChanged(projectPath: string): Promise<boolean> {
+    const hashFile = path.join(projectPath, '.deps-hash.json')
+    const lockFiles = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'package.json']
+
+    const hash = crypto.createHash('sha256')
+    for (const f of lockFiles) {
+      const p = path.join(projectPath, f)
+      try {
+        hash.update(await fs.readFile(p))
+      } catch {
+        // 文件不存在则跳过
+      }
+    }
+    const current = hash.digest('hex')
+
+    let previous = ''
+    try {
+      previous = JSON.parse(await fs.readFile(hashFile, 'utf-8')).hash || ''
+    } catch {
+      // 无缓存
+    }
+
+    const nodeModulesExists = await fs.access(path.join(projectPath, 'node_modules')).then(() => true).catch(() => false)
+
+    // 记录本次哈希
+    await fs.writeFile(hashFile, JSON.stringify({ hash: current }))
+
+    if (previous && previous === current && nodeModulesExists) {
+      logger.info('build', 'Dependencies unchanged, skipping install')
+      return false
+    }
+    return true
+  }
+
   async installDependencies(
     projectPath: string,
     packageManager: PackageManager

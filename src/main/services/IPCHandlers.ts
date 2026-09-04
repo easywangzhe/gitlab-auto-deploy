@@ -24,6 +24,7 @@ import { credentialService } from './SecretStoreService'
 import { deploymentQueue } from './DeploymentQueue'
 import { daemonService } from './DaemonService'
 import { webhookService, WebhookConfig } from './WebhookService'
+import { inboundWebhookService, InboundWebhookConfig } from './InboundWebhookService'
 import { prometheusMetrics, MetricsConfig } from './PrometheusMetricsService'
 import { logService, LogCategory } from './LogService'
 import { logger } from '../utils/logger'
@@ -92,6 +93,26 @@ async function loadData(): Promise<void> {
       logger.info('ipc', 'Migrating server to servers array')
       parsedData.servers = [parsedData.server]
       delete parsedData.server
+    }
+
+    // 解密凭据；旧明文数据（非加密格式）保留原值，实现平滑迁移
+    for (const c of parsedData.gitlabConnections || []) {
+      if (c.token) {
+        try {
+          c.token = await credentialService.decryptString(c.token)
+        } catch {
+          // 已是明文，保持不变
+        }
+      }
+    }
+    for (const s of parsedData.servers || []) {
+      if (s.password) {
+        try {
+          s.password = await credentialService.decryptString(s.password)
+        } catch {
+          // 已是明文，保持不变
+        }
+      }
     }
 
     // Use safeParse to see validation errors
@@ -196,7 +217,21 @@ async function saveProject(project: GitLabProject): Promise<void> {
 async function saveSettingsData(): Promise<void> {
   if (!settings) return
   await ensureDataDir()
-  await fs.writeFile(getSettingsPath(), JSON.stringify(settings, null, 2))
+
+  // 落盘前加密凭据：明文 password/token 不写入磁盘
+  const toPersist = structuredClone(settings) as AppSettings
+  for (const c of toPersist.gitlabConnections || []) {
+    if (c.token) {
+      c.token = await credentialService.encryptString(c.token)
+    }
+  }
+  for (const s of toPersist.servers || []) {
+    if (s.password) {
+      s.password = await credentialService.encryptString(s.password)
+    }
+  }
+
+  await fs.writeFile(getSettingsPath(), JSON.stringify(toPersist, null, 2))
 }
 
 // Generate UUID
@@ -453,6 +488,15 @@ export async function registerIPCHandlers(): Promise<void> {
           merged.daemon.startTime || '09:00',
           merged.daemon.endTime || '18:00'
         )
+      }
+
+      // 同步入站 webhook 服务（启用/禁用/端口/密钥变化）
+      if (merged.inboundWebhook) {
+        inboundWebhookService.sync(merged.inboundWebhook).catch((error) => {
+          logger.error('ipc', 'Failed to sync inbound webhook', {
+            error: error instanceof Error ? error.message : 'Unknown error'
+          })
+        })
       }
 
       sendToAll('settings:updated', sanitizeSettings(merged))
@@ -937,6 +981,37 @@ export async function registerIPCHandlers(): Promise<void> {
     }
   })
 
+  // ==================== Inbound Webhook ====================
+
+  ipcMain.handle('webhook-in:config', async () => {
+    return { success: true, data: inboundWebhookService.getConfig() }
+  })
+
+  ipcMain.handle('webhook-in:update', async (_event, config: Partial<InboundWebhookConfig>) => {
+    try {
+      // 持久化到 settings 并同步服务
+      if (!settings) return { success: false, error: 'Settings not loaded' }
+      settings.inboundWebhook = { ...(settings.inboundWebhook || {}), ...config }
+      await saveSettingsData()
+      await inboundWebhookService.sync(config)
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update inbound webhook'
+      }
+    }
+  })
+
+  // 应用启动时根据配置同步入站 webhook
+  if (settings?.inboundWebhook?.enabled) {
+    inboundWebhookService.sync(settings.inboundWebhook).catch((error) => {
+      logger.error('ipc', 'Failed to start inbound webhook', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+    })
+  }
+
   logger.info('ipc', 'IPC handlers registered')
 }
 
@@ -953,5 +1028,16 @@ export function setupDeploymentCallbacks(): void {
       progress: deployment.progress || 0,
       message: deployment.logs?.slice(-1)[0]?.message || ''
     })
+  })
+
+  // 实时日志：新日志追加后推送增量
+  deployService.setOnLogAdded((deployment) => {
+    const lastLog = deployment.logs?.slice(-1)[0]
+    if (lastLog) {
+      sendToAll('deployment:log', {
+        deploymentId: deployment.id,
+        log: lastLog
+      })
+    }
   })
 }

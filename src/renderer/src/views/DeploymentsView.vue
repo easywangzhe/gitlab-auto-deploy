@@ -127,6 +127,16 @@ const viewLogs = async (deployment: Deployment) => {
   }
 }
 
+// 日志实时追加：优先取 store 中响应式的 logs，未命中则用已加载快照
+const liveLogs = computed(() => {
+  if (!selectedDeployment.value) return deploymentLogs.value
+  const d = deploymentsStore.deployments.find(x => x.id === selectedDeployment.value!.id)
+  if (d && d.logs && d.logs.length > 0) {
+    return d.logs
+  }
+  return deploymentLogs.value
+})
+
 const openWorkspace = async (projectId: string) => {
   const result = await window.electronAPI.openWorkspace(projectId)
   if (!result.success) {
@@ -242,12 +252,12 @@ const getLogLevelType = (level: string): string => {
       destroy-on-close
     >
       <div class="log-container" v-loading="loadingLogs">
-        <div v-if="deploymentLogs.length === 0 && !loadingLogs" class="no-logs">
+        <div v-if="liveLogs.length === 0 && !loadingLogs" class="no-logs">
           暂无日志
         </div>
         <div v-else class="log-list">
           <div
-            v-for="(log, index) in deploymentLogs"
+            v-for="(log, index) in liveLogs"
             :key="index"
             class="log-item"
           >

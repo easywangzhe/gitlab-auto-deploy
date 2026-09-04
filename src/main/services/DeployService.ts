@@ -32,6 +32,11 @@ class RedirectError extends Error {
 export class DeployService {
   private deployments: Map<string, Deployment> = new Map()
   private deploymentsPath: string | null = null
+  private onLogAdded?: (deployment: Deployment) => void
+
+  setOnLogAdded(callback: (deployment: Deployment) => void): void {
+    this.onLogAdded = callback
+  }
 
   private getDeploymentsPath(): string {
     if (!this.deploymentsPath) {
@@ -159,6 +164,8 @@ export class DeployService {
         message
       })
       await this.saveDeployment(deployment)
+      // 通知渲染层追加日志（实时日志）
+      this.onLogAdded?.(deployment)
     }
   }
 
@@ -378,6 +385,24 @@ export class DeployService {
 
   getAllDeployments(): Deployment[] {
     return Array.from(this.deployments.values())
+  }
+
+  /**
+   * 每个项目只保留最近 retention 条部署记录，删除更旧的（持久化文件一并清理）。
+   */
+  async pruneDeploymentsByProject(projectId: string, retention: number): Promise<void> {
+    const list = this.getDeploymentsByProject(projectId)
+      .sort((a, b) => (a.startedAt.getTime?.() ?? 0) - (b.startedAt.getTime?.() ?? 0))
+
+    if (list.length <= retention) return
+
+    const excess = list.slice(0, list.length - retention)
+    for (const d of excess) {
+      await this.deleteDeployment(d.id)
+    }
+    if (excess.length > 0) {
+      logger.info('deploy', `Pruned ${excess.length} old deployments for project ${projectId}`)
+    }
   }
 
   getDeploymentsByProject(projectId: string): Deployment[] {

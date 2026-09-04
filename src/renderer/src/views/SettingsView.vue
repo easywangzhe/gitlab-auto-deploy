@@ -20,6 +20,9 @@ const endTime = ref('18:00')
 const theme = ref<'light' | 'dark' | 'auto'>('auto')
 const notifyOnSuccess = ref(true)
 const notifyOnFailure = ref(true)
+const webhookEnabled = ref(false)
+const webhookPort = ref(8899)
+const webhookSecret = ref('')
 
 // 应用主题到 DOM
 const applyTheme = (themeValue: 'light' | 'dark' | 'auto') => {
@@ -62,6 +65,11 @@ onMounted(async () => {
       notifyOnSuccess.value = settings.value.notifications.notifyOnSuccess ?? true
       notifyOnFailure.value = settings.value.notifications.notifyOnFailure ?? true
     }
+    if (settings.value?.inboundWebhook) {
+      webhookEnabled.value = settings.value.inboundWebhook.enabled || false
+      webhookPort.value = settings.value.inboundWebhook.port || 8899
+      webhookSecret.value = settings.value.inboundWebhook.secret || ''
+    }
     theme.value = settings.value?.theme || 'auto'
 
     // 应用初始主题
@@ -93,6 +101,11 @@ const autoSaveSettings = async (startStopDaemon = false) => {
         enabled: true,
         notifyOnSuccess: notifyOnSuccess.value,
         notifyOnFailure: notifyOnFailure.value
+      },
+      inboundWebhook: {
+        enabled: webhookEnabled.value,
+        port: webhookPort.value,
+        secret: webhookSecret.value
       }
     })
   } catch (error) {
@@ -134,7 +147,7 @@ const onDaemonEnabledChange = async (enabled: boolean) => {
 }
 
 // 监听其他设置变化，自动保存
-watch([theme, pollingInterval, notifyOnSuccess, notifyOnFailure, scheduleEnabled, startTime, endTime], () => {
+watch([theme, pollingInterval, notifyOnSuccess, notifyOnFailure, scheduleEnabled, startTime, endTime, webhookEnabled, webhookPort, webhookSecret], () => {
   autoSaveSettings()
 })
 
@@ -242,6 +255,22 @@ const navigateTo = (path: string) => {
 
             <el-form-item label="部署失败通知">
               <el-switch v-model="notifyOnFailure" />
+            </el-form-item>
+
+            <el-divider content-position="left">入站 Webhook 触发</el-divider>
+
+            <el-form-item label="启用 Webhook 触发">
+              <el-switch v-model="webhookEnabled" />
+              <div class="form-tip">开启后监听本地 HTTP 端口接收 GitLab push/MR 事件，秒级触发部署（替代轮询）</div>
+            </el-form-item>
+
+            <el-form-item label="监听端口">
+              <el-input-number v-model="webhookPort" :min="1" :max="65535" :disabled="!webhookEnabled" />
+              <div class="form-tip">GitLab Webhook URL 形如 http://&lt;本机IP&gt;:{{ webhookPort }}/webhook</div>
+            </el-form-item>
+
+            <el-form-item label="Secret Token">
+              <el-input v-model="webhookSecret" type="password" show-password :disabled="!webhookEnabled" placeholder="与 GitLab Webhook 配置保持一致（建议填写）" style="width: 320px" />
             </el-form-item>
           </el-form>
         </el-card>

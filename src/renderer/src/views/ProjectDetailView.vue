@@ -175,6 +175,27 @@ const executeRollback = async () => {
   }
 }
 
+// 一键回滚到上一个成功部署的版本
+const rollingBackLast = ref(false)
+const rollbackToLast = async () => {
+  if (!project.value || rollingBackLast.value) return
+
+  rollingBackLast.value = true
+  try {
+    const lastSha = await deploymentsStore.getLastSuccessfulCommit(projectId.value)
+    if (!lastSha) {
+      ElMessage.warning('未找到上一个成功部署的版本')
+      return
+    }
+    await deploymentsStore.rollbackToCommit(projectId.value, lastSha, project.value.branch)
+    ElMessage.success(`已开始回滚到上一成功版本 ${lastSha.substring(0, 7)}`)
+  } catch (error) {
+    ElMessage.error('回滚失败: ' + (error instanceof Error ? error.message : '未知错误'))
+  } finally {
+    rollingBackLast.value = false
+  }
+}
+
 // 格式化时间
 const formatTime = (date: Date) => {
   return new Date(date).toLocaleString('zh-CN')
@@ -202,6 +223,7 @@ const formatTime = (date: Date) => {
             <span>项目信息</span>
             <div class="card-header-actions">
               <el-button type="warning" @click="openRollbackDialog">回滚</el-button>
+              <el-button type="info" :loading="rollingBackLast" :disabled="rollingBackLast" @click="rollbackToLast">回滚到上一版本</el-button>
               <el-button type="primary" @click="startDeploy" :loading="deploying" :disabled="deploying">开始部署</el-button>
             </div>
           </div>

@@ -112,6 +112,11 @@ interface ElectronAPI {
     progress: number
     message: string
   }) => void) => () => void
+  onDeploymentLog: (callback: (data: {
+    deploymentId: string
+    log: { timestamp: Date; level: string; message: string }
+  }) => void) => () => void
+  onDaemonAlert: (callback: (data: { projectId: string; message: string; failures: number }) => void) => () => void
   onSettingsUpdated: (callback: (settings: AppSettings) => void) => () => void
   removeAllListeners: (channel: string) => void
 
@@ -221,6 +226,21 @@ const api: ElectronAPI = {
     }) => callback(data)
     ipcRenderer.on('deployment:progress', handler)
     return () => ipcRenderer.removeListener('deployment:progress', handler)
+  },
+
+  onDeploymentLog: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: {
+      deploymentId: string
+      log: { timestamp: Date; level: string; message: string }
+    }) => callback(data)
+    ipcRenderer.on('deployment:log', handler)
+    return () => ipcRenderer.removeListener('deployment:log', handler)
+  },
+
+  onDaemonAlert: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { projectId: string; message: string; failures: number }) => callback(data)
+    ipcRenderer.on('daemon:alert', handler)
+    return () => ipcRenderer.removeListener('daemon:alert', handler)
   },
 
   onSettingsUpdated: (callback) => {

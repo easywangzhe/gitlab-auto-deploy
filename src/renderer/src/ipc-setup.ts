@@ -54,8 +54,33 @@ export function setupIPCListeners(): void {
   }
 
   if (window.electronAPI?.onDeploymentProgress) {
+    const notified = new Set<string>()
     const unsubscribe = window.electronAPI.onDeploymentProgress((data) => {
       deploymentsStore.handleDeploymentProgress(data)
+      // 成功/失败落地时进入通知中心（每部署仅一次）
+      if ((data.status === 'success' || data.status === 'failed') && !notified.has(data.deploymentId)) {
+        notified.add(data.deploymentId)
+        const ok = data.status === 'success'
+        notificationsStore[ok ? 'notifySuccess' : 'notifyError'](
+          ok ? '部署成功' : '部署失败',
+          data.message || (ok ? '部署已完成' : '部署失败'),
+          { deploymentId: data.deploymentId }
+        )
+      }
+    })
+    cleanupFns.push(unsubscribe)
+  }
+
+  if (window.electronAPI?.onDeploymentLog) {
+    const unsubscribe = window.electronAPI.onDeploymentLog((data) => {
+      deploymentsStore.handleDeploymentLog(data)
+    })
+    cleanupFns.push(unsubscribe)
+  }
+
+  if (window.electronAPI?.onDaemonAlert) {
+    const unsubscribe = window.electronAPI.onDaemonAlert((data) => {
+      notificationsStore.notifyWarning('守护进程告警', data.message, { projectId: data.projectId })
     })
     cleanupFns.push(unsubscribe)
   }

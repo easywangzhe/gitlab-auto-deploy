@@ -47,6 +47,8 @@ class DaemonService {
   }
   private onStatusChange?: (status: DaemonState) => void
   private isScheduleActive: boolean = false  // 当前是否在调度时间段内
+  private failureCounts: Map<string, number> = new Map()
+  private readonly FAILURE_ALERT_THRESHOLD = 3
 
   /**
    * Get the path to the last check times cache file
@@ -483,6 +485,9 @@ class DaemonService {
       // Save to cache file
       this.saveLastCheckTimes()
 
+      // 轮询成功，清零失败计数
+      this.failureCounts.delete(project.id)
+
       if (!shouldDeploy) {
         logService.debug('gitlab-poll', `No new changes for ${project.name}`)
       }
@@ -493,6 +498,20 @@ class DaemonService {
         error: errorMsg,
         projectId: project.id
       })
+
+      // 连续失败告警
+      const count = (this.failureCounts.get(project.id) || 0) + 1
+      this.failureCounts.set(project.id, count)
+      if (count === this.FAILURE_ALERT_THRESHOLD) {
+        const msg = `项目 "${project.name}" 连续 ${count} 次轮询失败，请检查 GitLab 连接`
+        logService.warn('daemon', msg, { projectId: project.id })
+        this.sendNotification('守护进程告警', msg)
+        this.broadcast('daemon:alert', { projectId: project.id, message: msg, failures: count })
+      } else if (count > this.FAILURE_ALERT_THRESHOLD && count % 10 === 0) {
+        // 阈值后每 10 次再提醒一次，避免刷屏
+        const msg = `项目 "${project.name}" 已连续 ${count} 次轮询失败`
+        this.sendNotification('守护进程告警', msg)
+      }
     }
   }
 

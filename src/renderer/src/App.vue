@@ -2,16 +2,25 @@
 import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSettingsStore } from './stores/settings'
+import { useNotificationsStore } from './stores/notifications'
 import logoSvg from './assets/logo.svg'
 
 const route = useRoute()
 const router = useRouter()
 const settingsStore = useSettingsStore()
+const notificationsStore = useNotificationsStore()
 
 const currentPath = computed(() => route.path)
 
 const navigateTo = (path: string) => {
   router.push(path)
+}
+
+const typeTag: Record<string, string> = {
+  info: 'info',
+  success: 'success',
+  warning: 'warning',
+  error: 'danger'
 }
 
 // 主题初始化和应用
@@ -126,6 +135,37 @@ watch(() => settingsStore.settings?.theme, (newTheme) => {
           </el-breadcrumb>
         </div>
         <div class="header-right">
+          <el-popover placement="bottom-end" width="360" trigger="click">
+            <template #reference>
+              <el-badge :value="notificationsStore.unreadCount" :hidden="notificationsStore.unreadCount === 0" :max="99">
+                <el-button text>
+                  <el-icon><Bell /></el-icon>
+                </el-button>
+              </el-badge>
+            </template>
+            <div class="notif-panel">
+              <div class="notif-header">
+                <span>通知</span>
+                <el-button link size="small" @click="notificationsStore.clearAll()">清空</el-button>
+              </div>
+              <el-scrollbar max-height="400px">
+                <el-empty v-if="notificationsStore.notifications.length === 0" description="暂无通知" :image-size="60" />
+                <div v-else>
+                  <div
+                    v-for="n in notificationsStore.notifications"
+                    :key="n.id"
+                    class="notif-item"
+                    :class="{ unread: !n.read }"
+                    @click="notificationsStore.markAsRead(n.id)"
+                  >
+                    <el-tag :type="typeTag[n.type] as any" size="small">{{ n.title }}</el-tag>
+                    <div class="notif-msg">{{ n.message }}</div>
+                    <div class="notif-time">{{ new Date(n.timestamp).toLocaleString('zh-CN') }}</div>
+                  </div>
+                </div>
+              </el-scrollbar>
+            </div>
+          </el-popover>
           <el-button text @click="navigateTo('/settings')">
             <el-icon><Setting /></el-icon>
           </el-button>
@@ -281,6 +321,60 @@ html, body, #app {
     display: flex;
     align-items: center;
     gap: 10px;
+  }
+}
+
+/* Notification panel */
+.notif-panel {
+  .notif-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 4px 12px;
+    font-weight: 600;
+    border-bottom: 1px solid #ebeef5;
+    margin-bottom: 8px;
+  }
+
+  .notif-item {
+    padding: 10px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+
+    &.unread {
+      background: #f5f7fa;
+    }
+
+    .notif-msg {
+      margin: 6px 0 4px;
+      font-size: 13px;
+      color: #303133;
+      word-break: break-all;
+    }
+
+    .notif-time {
+      font-size: 11px;
+      color: #909399;
+    }
+  }
+}
+
+html.dark .notif-panel {
+  .notif-header {
+    border-bottom-color: #333;
+  }
+
+  .notif-item {
+    border-bottom-color: #2a2a2a;
+
+    &.unread {
+      background: #242424;
+    }
+
+    .notif-msg {
+      color: #e5eaf3;
+    }
   }
 }
 

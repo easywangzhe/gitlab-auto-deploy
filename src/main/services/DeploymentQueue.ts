@@ -455,12 +455,21 @@ export class DeploymentQueue {
         packageManager
       })
 
-      deployService.addDeploymentLog(deploymentId, 'info', 'Installing dependencies...')
-      logService.info('build', `Installing dependencies for ${project.name}`, { projectId: project.id })
-      await buildService.installDependencies(projectPath, packageManager)
+      deployService.addDeploymentLog(deploymentId, 'info', 'Checking dependencies...')
+      logService.info('build', `Checking dependencies for ${project.name}`, { projectId: project.id })
+      const depsChanged = await buildService.dependenciesChanged(projectPath)
+
+      if (depsChanged) {
+        deployService.addDeploymentLog(deploymentId, 'info', 'Installing dependencies...')
+        logService.info('build', `Installing dependencies for ${project.name}`, { projectId: project.id })
+        await buildService.installDependencies(projectPath, packageManager)
+        deployService.addDeploymentLog(deploymentId, 'info', 'Dependencies installed')
+        logService.info('build', `Dependencies installed for ${project.name}`, { projectId: project.id })
+      } else {
+        deployService.addDeploymentLog(deploymentId, 'info', 'Dependencies unchanged, skipping install')
+        logService.info('build', `Dependencies unchanged for ${project.name}, skipping install`, { projectId: project.id })
+      }
       deployService.updateProgress(deploymentId, 25)
-      deployService.addDeploymentLog(deploymentId, 'info', 'Dependencies installed')
-      logService.info('build', `Dependencies installed for ${project.name}`, { projectId: project.id })
 
       this.onDeploymentUpdate?.(deployService.getDeployment(deploymentId)!)
 
@@ -662,6 +671,12 @@ export class DeploymentQueue {
       const duration = (Date.now() - startTime) / 1000
       prometheusMetrics.trackDeploymentDuration(project.id, 'success', duration)
       prometheusMetrics.updateInProgressDeployments(project.id, 0)
+
+      // 清理超出保留数的旧部署记录（后台，不阻塞）
+      const retention = settings?.deploymentRetention || 20
+      deployService.pruneDeploymentsByProject(project.id, retention).catch(err => {
+        logService.warn('deploy', 'Failed to prune old deployments', { error: err })
+      })
 
       // Trigger webhook for deployment success
       webhookService.trigger('deployment.success', deployService.getDeployment(deploymentId)!, project, mergeRequest)

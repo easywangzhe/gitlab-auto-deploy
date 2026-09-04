@@ -94,7 +94,7 @@ export const useDeploymentsStore = defineStore('deployments', () => {
 
   function handleDeploymentProgress(data: DeploymentProgress): void {
     activeDeployments.value.set(data.deploymentId, data)
-    
+
     // Update deployment in list if exists
     const index = deployments.value.findIndex(d => d.id === data.deploymentId)
     if (index >= 0) {
@@ -107,6 +107,19 @@ export const useDeploymentsStore = defineStore('deployments', () => {
       setTimeout(() => {
         activeDeployments.value.delete(data.deploymentId)
       }, 5000) // Keep visible for 5 seconds after completion
+    }
+  }
+
+  // 实时追加日志
+  function handleDeploymentLog(data: { deploymentId: string; log: { timestamp: Date; level: string; message: string } }): void {
+    const index = deployments.value.findIndex(d => d.id === data.deploymentId)
+    if (index >= 0) {
+      const d = deployments.value[index]
+      d.logs = [...(d.logs || []), {
+        timestamp: new Date(data.log.timestamp),
+        level: data.log.level as 'debug' | 'info' | 'warn' | 'error',
+        message: data.log.message
+      }]
     }
   }
 
@@ -160,6 +173,7 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     deleteDeployment,
     handleDeploymentStarted,
     handleDeploymentProgress,
+    handleDeploymentLog,
     getDeploymentsByProject,
     getBranchCommits,
     getLastSuccessfulCommit,
